@@ -5,95 +5,147 @@ Mitesh, The Mouse <mitsharm@redhat.com>
 :icons: font
 
 A local web dashboard for managing multiple RHDP Showroom CI instances.
-Run solve and validate actions from one place instead of clicking through each Showroom tab individually.
+Stop clicking through individual Showroom tabs — run Solve and Validate across all your CIs from one place.
 
-== Requirements
+== Prerequisites
 
-* Python 3.11+
-* Network access to your Showroom instances
+Before you begin, make sure you have:
 
-== Getting Started
+* https://git-scm.com[Git]
+* https://www.python.org/downloads/[Python 3.11 or newer]
+* Network access to your Showroom instances (VPN if required)
+
+Verify Python is ready:
 
 [source,bash]
 ----
-cd ~/office_work/MouseOps
+python3 --version
+----
+
+You should see `Python 3.11.x` or higher.
+
+== Installation
+
+Clone the repository and enter the project directory:
+
+[source,bash]
+----
+git clone git@github.com:miteshget/MouseOps.git
+cd MouseOps
+----
+
+== Starting the App
+
+[source,bash]
+----
 bash run.sh
+----
+
+The first run automatically creates a Python virtualenv and installs all dependencies.
+Every subsequent run skips setup and starts the server immediately.
+
+You should see:
+
+----
+MouseOps → http://127.0.0.1:8765
 ----
 
 Open http://127.0.0.1:8765 in your browser.
 
-`run.sh` creates a `.venv` virtualenv and installs dependencies on first run.
-Subsequent runs skip straight to starting the server.
+To stop the server press `Ctrl+C`.
 
-== Adding a CI Instance
+== First Steps
+
+When you open MouseOps for the first time the dashboard is empty.
+Start by adding the CI instances you want to manage.
+
+=== Add a CI Instance
 
 . Click *+ Add CI* in the top-right corner.
 . Fill in the form:
 +
 [cols="1,3"]
 |===
-| Field | Description
+| Field | What to enter
 
 | *Name*
-| A label to identify the CI, e.g. `LB1237 - RHEL10 - h9lhq`
+| A short label so you can tell CIs apart, e.g. `LB1237 - RHEL10 - h9lhq`
 
 | *Showroom URL*
 | The base URL of the Showroom, e.g. `https://showroom.apps.cluster.example.com`
 
 | *Auth Token*
-| Bearer token if your Showroom requires authentication. Leave blank if not needed.
+| Bearer token if authentication is required. Leave blank if not needed.
 
 | *Modules*
-| Comma-separated list of modules, e.g. `module-01,module-02,module-03`.
-  Use *Auto-fill* to generate a range (see below).
+| The modules that exist on this Showroom. Type them comma-separated or use *Auto-fill* (see below).
 |===
 
-. Click *Add CI*.
+. Click *Add CI*. The card appears on the dashboard immediately.
 
-=== Auto-filling Modules
+Repeat for every CI you want to manage.
 
-Instead of typing modules manually, use the *Auto-fill* helper:
+=== Auto-fill Modules
 
-. Enter the start number in the *from* field (use `0` if modules start at `module-00`).
-. Enter the end number in the *to* field.
-. Click *Fill* — the modules field populates automatically with zero-padded names.
+If your lab has a numbered sequence of modules, use the *Auto-fill* helper instead of typing each one:
 
-Example: `from 0 to 7` → `module-00,module-01,...,module-07`
+. In the *from* field enter the first module number (use `0` if your lab starts at `module-00`).
+. In the *to* field enter the last module number.
+. Click *Fill*.
 
-== Running Actions
+The modules field fills automatically with zero-padded names.
 
-Each CI card has two action buttons:
+.Example
+`from 0 to 7` → `module-00, module-01, module-02, ... module-07`
+
+NOTE: Some labs start at `module-00`, others at `module-01`. Check your Showroom page before filling.
+
+== Running Solve and Validate
+
+Each CI card has its own controls.
+
+=== Single Module
+
+. Pick the module from the *Module* dropdown at the top of the card.
+. Click the action you want:
 
 [cols="1,3"]
 |===
-| Button | Action
+| Button | What it does
 
 | *🚀 Solve*
-| Runs the solve playbook for the selected module.
+| Runs the solve playbook on the selected module. Use this to automatically complete a lab step.
 
 | *✓ Validate*
-| Runs the validate playbook for the selected module.
+| Runs the validate playbook on the selected module. Use this to check whether a step is correctly completed.
 |===
 
-Select the target module from the *Module* dropdown before clicking.
+Live task progress appears on the card as coloured chips.
+Expand *Show logs* to see the full Ansible output.
 
 === Bulk Actions
 
-Use *🚀 Solve All* or *✓ Validate All* in the top header to trigger the selected module on every CI card simultaneously.
+To trigger the same action across all CIs at once, use the header buttons:
 
-== Sequential Run (Run All Modules)
+* *🚀 Solve All* — runs Solve on every card's currently selected module simultaneously.
+* *✓ Validate All* — runs Validate on every card's currently selected module simultaneously.
 
-The *▶▶ Run All* button runs every module in order — solve first, then validate — stopping if a step fails.
+== Sequential Run
 
-=== Selecting a Range
+*▶▶ Run All* runs every module on a card in order — Solve first, then Validate — only moving to the next module when the current one passes both steps.
 
-Use the *from* and *to* dropdowns next to *▶▶ Run All* to run a subset of modules.
+=== Run a Range of Modules
 
-Example: set `from module-03 to module-10` to skip the first two modules and run only modules 03–10.
+Use the *from* and *to* dropdowns next to *▶▶ Run All* to limit which modules are included:
 
-=== Skip & Continue
+.Example
+Set `from module-03 to module-10` to start at module-03 and stop after module-10, skipping everything outside that range.
 
-When a module fails during a sequential run, MouseOps pauses and shows two options:
+The *to* dropdown defaults to the last module so the default behaviour is to run everything.
+
+=== What Happens When a Module Fails
+
+MouseOps pauses and shows two options:
 
 [cols="1,3"]
 |===
@@ -101,19 +153,19 @@ When a module fails during a sequential run, MouseOps pauses and shows two optio
 
 | *⏭ Skip & Continue*
 | Skips the failed module and continues with the next one.
-  The failed module stays marked ❌ in the summary table.
+The failed module stays marked ❌ in the summary table.
 
 | *■ Stop*
-| Stops the sequential run immediately.
+| Stops the run immediately.
 |===
 
-=== Stopping a Run
+=== Cancel at Any Time
 
-Click *■ Stop* at any point to cancel the current stream or sequential run.
+Click *■ Stop* to cancel the currently running stream or sequential run.
 
 == Module Summary Table
 
-After any action, a summary table appears on the card showing solve and validate status per module:
+After any action, a summary table appears on the card:
 
 [cols="1,1,1"]
 |===
@@ -126,39 +178,75 @@ After any action, a summary table appears on the card showing solve and validate
 | module-02
 | ❌ Fail
 | —
+
+| module-03
+| —
+| —
 |===
 
-The table persists across page refreshes.
-Re-running a module updates its row in-place.
+* The table appears automatically after the first run — no action needed.
+* It updates in real-time as each module completes.
+* It persists across page refreshes — your history is not lost when you reload.
+* Re-running a module overwrites its row with the latest result.
 
-== Managing CI Instances
+== Editing and Removing CIs
 
-* *✎ Edit* — update the name, URL, token, or module list.
-* *✕ Remove* — delete the CI and clear its history.
-* Editing a CI and leaving the token field blank keeps the existing token.
+* Click *✎* on a card to edit the name, URL, token, or module list.
+* Click *✕* to remove the CI and clear its history.
 
-== Data Storage
+TIP: When editing, leave the *Auth Token* field blank to keep the existing token unchanged.
+Only fill it in when you want to set a new one.
 
-CI configurations (name, URL, token, modules) are saved to `cis.json` in the project directory.
-Module run history is stored in browser `localStorage`.
+== Where Data Is Stored
 
-NOTE: `cis.json` is excluded from version control via `.gitignore` as it may contain auth tokens and environment-specific URLs.
+[cols="1,3"]
+|===
+| Data | Where
+
+| CI configurations (name, URL, token, modules)
+| `cis.json` in the project directory — created automatically on first use.
+
+| Module run history (pass/fail per module)
+| Browser `localStorage` — persists until you clear browser data.
+|===
+
+IMPORTANT: `cis.json` is in `.gitignore` and will never be committed.
+It is local to your machine and may contain auth tokens and internal Showroom URLs.
+
+== Updating
+
+Pull the latest changes and restart:
+
+[source,bash]
+----
+git pull
+bash run.sh
+----
+
+No manual dependency updates are needed — `run.sh` keeps the virtualenv in sync.
 
 == Troubleshooting
 
 [cols="1,3"]
 |===
-| Symptom | Fix
+| Problem | Fix
 
 | *❌ Showroom unreachable — HTTP 404*
-| The Showroom URL or module name is wrong. Check the URL in Edit and verify the module exists on the Showroom.
+| The URL or module name is wrong. Open the CI in *Edit* and double-check the Showroom URL.
+  Also verify the module name exists on that Showroom.
 
 | *❌ Cannot connect to Showroom*
-| The Showroom is not running or the URL is unreachable from your machine. Check VPN/network access.
+| The Showroom is down or not reachable from your network. Check your VPN connection and try opening the Showroom URL in your browser directly.
 
-| *Module summary gone after refresh*
-| `localStorage` was cleared. Re-run the modules to rebuild the summary.
+| *Port 8765 already in use*
+| Another process is using the port. Stop it or edit `run.sh` to change `--port 8765` to a free port.
 
-| *Virtualenv errors on first run*
-| Ensure Python 3.11+ is on your `PATH`: `python3 --version`
+| *Module summary missing after browser clear*
+| `localStorage` was wiped. Re-run the affected modules to rebuild the summary table.
+
+| *`python3: command not found`*
+| Install Python 3.11+ from https://www.python.org/downloads/ and ensure it is on your `PATH`.
+
+| *Permission denied on run.sh*
+| Make it executable: `chmod +x run.sh`
 |===
