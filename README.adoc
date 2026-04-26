@@ -51,7 +51,6 @@ MouseOps → http://127.0.0.1:8765
 ----
 
 Open http://127.0.0.1:8765 in your browser.
-
 To stop the server press `Ctrl+C`.
 
 == First Steps
@@ -61,7 +60,7 @@ Start by adding the CI instances you want to manage.
 
 === Add a CI Instance
 
-. Click *+ Add CI* in the top-right corner.
+. Click *＋ Add CI* in the top-right corner.
 . Fill in the form:
 +
 [cols="1,3"]
@@ -100,50 +99,54 @@ The modules field fills automatically with zero-padded names.
 
 NOTE: Some labs start at `module-00`, others at `module-01`. Check your Showroom page before filling.
 
-== Running Solve and Validate
+== CI Card Layout
 
-Each CI card has its own controls.
+Each CI card is divided into two sections.
 
-=== Single Module
+=== Individual Execution
 
-. Pick the module from the *Module* dropdown at the top of the card.
-. Click the action you want:
+Runs a single action on one selected module.
+
+. Pick the target module from the *Module* dropdown.
+. Click the action:
 
 [cols="1,3"]
 |===
 | Button | What it does
 
 | *🚀 Solve*
-| Runs the solve playbook on the selected module. Use this to automatically complete a lab step.
+| Runs the solve playbook on the selected module.
 
 | *✓ Validate*
-| Runs the validate playbook on the selected module. Use this to check whether a step is correctly completed.
+| Runs the validate playbook on the selected module.
 |===
 
-Live task progress appears on the card as coloured chips.
-Expand *Show logs* to see the full Ansible output.
+Live task progress appears as coloured chips.
+Click *Show logs* to see full Ansible output, or click *⤢* to open the log in a full-screen view.
 
-=== Bulk Actions
+=== Sequential Execution
 
-To trigger the same action across all CIs at once, use the header buttons:
+Runs actions across a range of modules in order, one module at a time.
 
-* *🚀 Solve All* — runs Solve on every card's currently selected module simultaneously.
-* *✓ Validate All* — runs Validate on every card's currently selected module simultaneously.
+. Set the *Range* using the *from* and *to* dropdowns (or number inputs if no modules are configured).
+. Click the action:
 
-== Sequential Run
+[cols="1,3"]
+|===
+| Button | What it does
 
-*▶▶ Run All* runs every module on a card in order — Solve first, then Validate — only moving to the next module when the current one passes both steps.
+| *▶ Solve*
+| Runs solve on every module in the range, in order.
 
-=== Run a Range of Modules
+| *▶ Validate*
+| Runs validate on every module in the range, in order.
 
-Use the *from* and *to* dropdowns next to *▶▶ Run All* to limit which modules are included:
+| *▶▶ Both*
+| Runs solve then validate on each module before moving to the next.
+Only continues to the next module when both steps pass.
+|===
 
-.Example
-Set `from module-03 to module-10` to start at module-03 and stop after module-10, skipping everything outside that range.
-
-The *to* dropdown defaults to the last module so the default behaviour is to run everything.
-
-=== What Happens When a Module Fails
+==== What Happens When a Module Fails
 
 MouseOps pauses and shows two options:
 
@@ -159,9 +162,40 @@ The failed module stays marked ❌ in the summary table.
 | Stops the run immediately.
 |===
 
-=== Cancel at Any Time
+==== Cancel at Any Time
 
 Click *■ Stop* to cancel the currently running stream or sequential run.
+
+== Bulk Actions (All CIs)
+
+Click *Actions ▾* in the top-right corner to run an action across every CI card at once.
+
+[cols="1,1,3"]
+|===
+| Section | Item | Behaviour
+
+| Individual
+| 🚀 Solve All
+| Fires solve on every card's currently selected module simultaneously.
+
+| Individual
+| ✓ Validate All
+| Fires validate on every card's currently selected module simultaneously.
+
+| Sequential
+| ▶ Solve All
+| Runs sequential solve-only on each CI, one CI at a time.
+
+| Sequential
+| ▶ Validate All
+| Runs sequential validate-only on each CI, one CI at a time.
+
+| Sequential
+| ▶▶ Run All
+| Runs sequential solve + validate on each CI, one CI at a time.
+|===
+
+NOTE: Sequential bulk actions process CIs one after another — the next CI does not start until the previous one completes or stops.
 
 == Module Summary Table
 
@@ -184,9 +218,9 @@ After any action, a summary table appears on the card:
 | —
 |===
 
-* The table appears automatically after the first run — no action needed.
-* It updates in real-time as each module completes.
-* It persists across page refreshes — your history is not lost when you reload.
+* Appears automatically after the first run — no action needed.
+* Updates in real-time as each module completes.
+* Persists across page refreshes — history is not lost when you reload.
 * Re-running a module overwrites its row with the latest result.
 
 == Editing and Removing CIs
@@ -196,6 +230,8 @@ After any action, a summary table appears on the card:
 
 TIP: When editing, leave the *Auth Token* field blank to keep the existing token unchanged.
 Only fill it in when you want to set a new one.
+
+NOTE: Editing or adding a CI while another is running does not interrupt the running stream.
 
 == Where Data Is Stored
 
@@ -232,14 +268,16 @@ No manual dependency updates are needed — `run.sh` keeps the virtualenv in syn
 | Problem | Fix
 
 | *❌ Showroom unreachable — HTTP 404*
-| The URL or module name is wrong. Open the CI in *Edit* and double-check the Showroom URL.
-  Also verify the module name exists on that Showroom.
+| The URL or module name is wrong. Open the CI in *✎ Edit* and double-check the Showroom URL.
+Also verify the module name exists on that Showroom.
 
 | *❌ Cannot connect to Showroom*
-| The Showroom is down or not reachable from your network. Check your VPN connection and try opening the Showroom URL in your browser directly.
+| The Showroom is down or not reachable from your network.
+Check your VPN connection and try opening the Showroom URL in your browser directly.
 
 | *Port 8765 already in use*
-| Another process is using the port. Stop it or edit `run.sh` to change `--port 8765` to a free port.
+| Another process is using the port.
+Stop it or edit `run.sh` to change `--port 8765` to a free port.
 
 | *Module summary missing after browser clear*
 | `localStorage` was wiped. Re-run the affected modules to rebuild the summary table.

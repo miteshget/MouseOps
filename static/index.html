@@ -60,6 +60,28 @@ body {
 }
 .header-actions { display: flex; gap: 0.5rem; align-items: center; }
 
+/* Actions dropdown */
+.actions-dropdown { position: relative; }
+.actions-menu {
+  display: none; position: absolute; top: calc(100% + 8px); right: 0;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.18);
+  min-width: 210px; z-index: 200; overflow: hidden;
+}
+.actions-menu.open { display: block; }
+.drop-section {
+  padding: 0.35rem 0.85rem 0.15rem;
+  font-size: 0.63rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--muted);
+}
+.drop-item {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.5rem 0.85rem; font-size: 0.84rem; color: var(--text);
+  cursor: pointer; transition: background .1s;
+}
+.drop-item:hover { background: var(--bg); }
+.drop-divider { height: 1px; background: var(--border); margin: 0.25rem 0; }
+
 /* ── Buttons ─────────────────────────────────────── */
 .btn {
   display: inline-flex; align-items: center; gap: 0.3rem;
@@ -137,23 +159,29 @@ body {
 .ci-card.is-failed  { border-top: 3px solid var(--danger); }
 
 .card-header {
-  padding: 0.8rem 1rem;
+  padding: 0.65rem 0.9rem;
   background: #fafbfc;
   border-bottom: 1px solid var(--border);
   display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem;
 }
-.card-title { font-weight: 700; font-size: 0.9rem; line-height: 1.35; }
-.card-url   { font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem; word-break: break-all; }
+.card-title { font-weight: 700; font-size: 0.88rem; line-height: 1.3; }
+.card-url {
+  display: inline-block; margin-top: 0.25rem;
+  font-size: 0.67rem; color: var(--muted);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 20px; padding: 0.08rem 0.55rem;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .card-header-btns { display: flex; gap: 0.2rem; flex-shrink: 0; }
 
-.card-body { padding: 0.85rem 1rem 1rem; }
+.card-body { padding: 0.7rem 0.9rem 0.9rem; }
 
 /* Module row */
 .module-row {
-  display: flex; align-items: center; gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  display: flex; align-items: center; gap: 0.45rem;
+  margin-bottom: 0.6rem;
 }
-.module-label { font-size: 0.78rem; color: var(--muted); white-space: nowrap; font-weight: 500; }
+.module-label { font-size: 0.75rem; color: var(--muted); white-space: nowrap; font-weight: 600; letter-spacing: 0.02em; }
 .module-select, .module-text {
   flex: 1; min-width: 0;
   padding: 0.32rem 0.55rem;
@@ -162,16 +190,26 @@ body {
 }
 .module-select:focus, .module-text:focus { border-color: var(--validate); }
 
+/* Section labels */
+.section-label {
+  font-size: 0.67rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--muted);
+  margin-bottom: 0.3rem; padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+
 /* Action rows */
 .action-row { display: flex; gap: 0.45rem; }
 
 .seq-row {
-  display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+  display: flex; flex-direction: column; gap: 0.35rem;
   margin-top: 0.55rem; padding: 0.45rem 0.65rem;
   background: rgba(111, 66, 193, 0.05);
   border: 1px solid rgba(111, 66, 193, 0.2);
   border-radius: 6px;
 }
+.seq-range-row  { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.seq-action-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
 
 /* Status line */
 .ci-status {
@@ -221,9 +259,10 @@ body {
 
 /* Module summary table */
 .module-history { margin-top: 0.7rem; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; font-size: 0.78rem; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
-.mh-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; padding: 0.24rem 0.65rem; gap: 0.75rem; border-bottom: 1px solid var(--border); }
+.mh-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; padding: 0.2rem 0.65rem; gap: 0.75rem; border-bottom: 1px solid var(--border); }
+.mh-row:nth-child(even):not(.mh-header) { background: #fafbfc; }
 .mh-row:last-child { border-bottom: none; }
-.mh-header { background: #f5f6f8; font-size: 0.67rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.mh-header { background: #f0f2f5; font-size: 0.65rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .mh-name { font-family: 'Courier New', monospace; font-size: 0.75rem; }
 .mh-badge { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0.1rem 0.45rem; border-radius: 3px; font-size: 0.72rem; font-weight: 500; white-space: nowrap; }
 .mh-ok      { background: #d1fae5; color: #065f46; }
@@ -252,6 +291,38 @@ body {
   font-family: 'Courier New', monospace; font-size: 0.7rem;
   padding: 0.6rem 0.75rem; max-height: 210px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
+}
+
+/* Expand log button inside summary bar */
+.btn-expand-log {
+  margin-left: auto; background: transparent; border: none;
+  color: #8b949e; cursor: pointer; font-size: 0.85rem;
+  padding: 0 0.2rem; line-height: 1; flex-shrink: 0;
+}
+.btn-expand-log:hover { color: var(--log-color); }
+
+/* Full-screen log modal */
+.log-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.75);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 300; padding: 1.5rem;
+}
+.log-modal-box {
+  background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
+  width: 100%; max-width: 960px; height: 82vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.log-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.55rem 1rem; background: #161b22; border-bottom: 1px solid #30363d;
+  flex-shrink: 0;
+}
+.log-modal-title { font-size: 0.82rem; color: #8b949e; font-family: 'Courier New', monospace; }
+.log-modal-pre {
+  flex: 1; overflow-y: auto; margin: 0;
+  background: #0d1117; color: var(--log-color);
+  font-family: 'Courier New', monospace; font-size: 0.75rem;
+  padding: 0.75rem 1rem; white-space: pre-wrap; word-break: break-all;
 }
 
 /* ── Modal ────────────────────────────────────────── */
@@ -309,9 +380,19 @@ body {
     <span class="rh-badge">RHDP</span>
   </div>
   <div class="header-actions">
-    <button class="btn btn-outline" onclick="bulkAction('solve')">🚀 Solve All</button>
-    <button class="btn btn-outline" onclick="bulkAction('validate')">✓ Validate All</button>
-    <button class="btn btn-outline" onclick="bulkRunAll()">▶▶ Run All</button>
+    <div class="actions-dropdown">
+      <button class="btn btn-outline" onclick="toggleActionsMenu(event)">Actions ▾</button>
+      <div class="actions-menu" id="actions-menu">
+        <div class="drop-section">Individual</div>
+        <div class="drop-item" onclick="bulkAction('solve');closeActionsMenu()">🚀 Solve All <small style="margin-left:auto;opacity:.6">current module</small></div>
+        <div class="drop-item" onclick="bulkAction('validate');closeActionsMenu()">✓ Validate All <small style="margin-left:auto;opacity:.6">current module</small></div>
+        <div class="drop-divider"></div>
+        <div class="drop-section">Sequential</div>
+        <div class="drop-item" onclick="bulkRunAll('solve');closeActionsMenu()">▶ Solve All <small style="margin-left:auto;opacity:.6">full range</small></div>
+        <div class="drop-item" onclick="bulkRunAll('validate');closeActionsMenu()">▶ Validate All <small style="margin-left:auto;opacity:.6">full range</small></div>
+        <div class="drop-item" onclick="bulkRunAll('both');closeActionsMenu()">▶▶ Run All <small style="margin-left:auto;opacity:.6">solve → validate</small></div>
+      </div>
+    </div>
     <button class="btn btn-primary" onclick="openModal()">＋ Add CI</button>
   </div>
 </header>
@@ -367,6 +448,17 @@ body {
   </div>
 </div>
 
+<!-- Log expand modal -->
+<div id="log-modal" class="log-modal" style="display:none" onclick="handleLogModalClick(event)">
+  <div class="log-modal-box">
+    <div class="log-modal-header">
+      <span class="log-modal-title" id="log-modal-title">Log</span>
+      <button class="btn-icon" style="color:#8b949e" onclick="closeLogModal()">✕</button>
+    </div>
+    <pre id="log-modal-pre" class="log-modal-pre"></pre>
+  </div>
+</div>
+
 <script>
 'use strict';
 
@@ -376,6 +468,7 @@ const runHistory = {};   // ciId → { [module]: { solve, validate } }  — null
 const seqFlags      = {};   // ciId → true means user requested stop of sequential run
 const skipResolvers = {};   // ciId → resolve fn waiting for skip/stop decision
 let editingId    = null;
+let openLogCiId  = null;   // ciId whose log is currently shown in the expand modal
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function api(method, path, body) {
@@ -409,8 +502,26 @@ function renderAll(cis) {
   }
   empty.style.display = 'none';
   grid.style.display  = '';
-  grid.innerHTML = '';
-  cis.forEach(ci => grid.appendChild(buildCard(ci)));
+
+  const newIds = new Set(cis.map(c => c.id));
+
+  // Remove cards for CIs that were deleted
+  grid.querySelectorAll('.ci-card').forEach(card => {
+    if (!newIds.has(card.dataset.ciId)) card.remove();
+  });
+
+  // Add or refresh cards in CI order
+  cis.forEach(ci => {
+    const existing = document.getElementById('card-' + ci.id);
+    const isActive = streams[ci.id] || (ci.id in seqFlags);
+
+    if (!existing) {
+      grid.appendChild(buildCard(ci));   // new CI — append
+    } else if (!isActive) {
+      existing.replaceWith(buildCard(ci));  // idle — refresh (picks up edits)
+    }
+    // active stream or sequential run — leave the card completely untouched
+  });
 }
 
 function buildCard(ci) {
@@ -445,18 +556,24 @@ function buildCard(ci) {
       </div>
     </div>
     <div class="card-body">
+      <div class="section-label">Individual Execution</div>
       <div class="module-row">
         <span class="module-label">Module:</span>
         ${modWidget}
       </div>
       <div class="action-row">
-        <button class="btn btn-solve"    onclick="startStream('${ci.id}','solve')">🚀 Solve</button>
-        <button class="btn btn-validate" onclick="startStream('${ci.id}','validate')">✓ Validate</button>
+        <button class="btn btn-solve btn-sm"    onclick="startStream('${ci.id}','solve')">🚀 Solve</button>
+        <button class="btn btn-validate btn-sm" onclick="startStream('${ci.id}','validate')">✓ Validate</button>
       </div>
+      <div class="section-label" style="margin-top:0.7rem">Sequential Execution</div>
       <div class="seq-row">
-        ${seqFromWidget}
-        <button class="btn btn-seq run-all-btn" onclick="runSequential('${ci.id}')">▶▶ Run All</button>
-        <button class="btn btn-ghost btn-sm stop-btn" style="display:none" onclick="userStop('${ci.id}')">■ Stop</button>
+        <div class="seq-range-row"><span class="module-label">Range:</span>${seqFromWidget}</div>
+        <div class="seq-action-row">
+          <button class="btn btn-solve   btn-sm seq-btn" onclick="runSequential('${ci.id}','solve')"   >▶ Solve</button>
+          <button class="btn btn-validate btn-sm seq-btn" onclick="runSequential('${ci.id}','validate')">▶ Validate</button>
+          <button class="btn btn-seq     btn-sm seq-btn" onclick="runSequential('${ci.id}','both')"    >▶▶ Both</button>
+          <button class="btn btn-ghost   btn-sm stop-btn" style="display:none" onclick="userStop('${ci.id}')">■ Stop</button>
+        </div>
       </div>
       <div class="module-history" style="display:none"></div>
       <div class="ci-status">⏸ Idle</div>
@@ -467,7 +584,9 @@ function buildCard(ci) {
       </div>
       <ul class="step-list"></ul>
       <details class="log-wrap" style="display:none">
-        <summary class="log-summary">Show logs</summary>
+        <summary class="log-summary">Show logs
+          <button class="btn-expand-log" title="Expand" onclick="openLogModal('${ci.id}');event.preventDefault()">⤢</button>
+        </summary>
         <pre class="log-content"></pre>
       </details>
     </div>`;
@@ -542,6 +661,11 @@ function startStream(ciId, stage, modOverride = null) {
 
     logEl.textContent += line + '\n';
     logEl.scrollTop    = logEl.scrollHeight;
+    if (openLogCiId === ciId) {
+      const mp = document.getElementById('log-modal-pre');
+      mp.textContent += line + '\n';
+      mp.scrollTop    = mp.scrollHeight;
+    }
 
     stepState = parseSolveLine(line, stepList, stepState);
     parseValidationMsg(line, stepList);
@@ -686,7 +810,7 @@ function setCardModule(ciId, mod) {
   else if (inp) inp.value = mod;
 }
 
-async function runSequential(ciId) {
+async function runSequential(ciId, mode = 'both') {
   const cis = await api('GET', '/cis');
   const ci  = cis.find(c => c.id === ciId);
   const card = document.getElementById('card-' + ciId);
@@ -696,81 +820,82 @@ async function runSequential(ciId) {
   const toEl    = card.querySelector('.seq-to');
   const ciMods  = ci && ci.modules && ci.modules.length > 1 ? ci.modules : null;
 
-  let mods, startIdx, endIdx;
+  let mods;
   if (ciMods) {
     // Configured modules — use dropdown values to slice the list
     const startMod = fromEl ? fromEl.value : ciMods[0];
     const endMod   = toEl   ? toEl.value   : ciMods[ciMods.length - 1];
-    startIdx = Math.max(0, ciMods.indexOf(startMod));
-    endIdx   = Math.min(ciMods.length - 1, Math.max(startIdx, ciMods.indexOf(endMod)));
-    mods     = ciMods.slice(startIdx, endIdx + 1);
+    const si = Math.max(0, ciMods.indexOf(startMod));
+    const ei = Math.min(ciMods.length - 1, Math.max(si, ciMods.indexOf(endMod)));
+    mods = ciMods.slice(si, ei + 1);
   } else {
     // No configured modules — generate list from number inputs
     const fromNum = parseInt(fromEl?.value) || 0;
     const toNum   = Math.max(fromNum, parseInt(toEl?.value) || fromNum);
-    mods      = Array.from({length: toNum - fromNum + 1}, (_, i) => 'module-' + String(fromNum + i).padStart(2, '0'));
-    startIdx  = 0;
-    endIdx    = mods.length - 1;
+    mods = Array.from({length: toNum - fromNum + 1}, (_, i) => 'module-' + String(fromNum + i).padStart(2, '0'));
   }
 
   seqFlags[ciId]   = false;
-  const runAllBtn  = card.querySelector('.run-all-btn');
-  const solveBtn   = card.querySelector('.btn-solve');
-  const validBtn   = card.querySelector('.btn-validate');
-  const statusEl   = card.querySelector('.ci-status');
+  const seqBtns  = card.querySelectorAll('.seq-btn');
+  const solveBtn = card.querySelector('.btn-solve');
+  const validBtn = card.querySelector('.btn-validate');
+  const statusEl = card.querySelector('.ci-status');
 
-  runAllBtn.disabled = true;
-  solveBtn.disabled  = true;
-  validBtn.disabled  = true;
+  seqBtns.forEach(b => b.disabled = true);
+  solveBtn.disabled = true;
+  validBtn.disabled = true;
   if (fromEl) fromEl.disabled = true;
   if (toEl)   toEl.disabled   = true;
 
   let stoppedAt = null;
 
-  for (let i = startIdx; i <= endIdx; i++) {
+  for (let i = 0; i < mods.length; i++) {
     if (seqFlags[ciId]) { stoppedAt = mods[i]; break; }
 
     const mod = mods[i];
     setCardModule(ciId, mod);
 
-    // Solve
-    const sp = startStream(ciId, 'solve', mod);
-    statusEl.innerHTML = `<span class="spinner"></span> [${i + 1}/${mods.length}] Solving ${mod}…`;
-    const solveResult  = await sp;
-    if (seqFlags[ciId] || solveResult === 'stopped') { stoppedAt = mod; break; }
-    if (solveResult !== 'ok') {
-      const d = await awaitSkipDecision(ciId, `Solve failed on ${mod} — skip and continue?`);
-      if (d === 'stop') { stoppedAt = mod; break; }
-      continue;   // skip validate + remaining steps for this module
+    if (mode !== 'validate') {
+      const sp = startStream(ciId, 'solve', mod);
+      statusEl.innerHTML = `<span class="spinner"></span> [${i + 1}/${mods.length}] Solving ${mod}…`;
+      const solveResult  = await sp;
+      if (seqFlags[ciId] || solveResult === 'stopped') { stoppedAt = mod; break; }
+      if (solveResult !== 'ok') {
+        const d = await awaitSkipDecision(ciId, `Solve failed on ${mod} — skip and continue?`);
+        if (d === 'stop') { stoppedAt = mod; break; }
+        continue;
+      }
     }
 
-    // Validate (only on solve pass)
-    const vp = startStream(ciId, 'validate', mod);
-    statusEl.innerHTML = `<span class="spinner"></span> [${i + 1}/${mods.length}] Validating ${mod}…`;
-    const validateResult = await vp;
-    if (seqFlags[ciId] || validateResult === 'stopped') { stoppedAt = mod; break; }
-    if (validateResult !== 'ok') {
-      const d = await awaitSkipDecision(ciId, `Validate failed on ${mod} — skip and continue?`);
-      if (d === 'stop') { stoppedAt = mod; break; }
-      continue;   // skip to next module
+    if (mode !== 'solve') {
+      const vp = startStream(ciId, 'validate', mod);
+      statusEl.innerHTML = `<span class="spinner"></span> [${i + 1}/${mods.length}] Validating ${mod}…`;
+      const validateResult = await vp;
+      if (seqFlags[ciId] || validateResult === 'stopped') { stoppedAt = mod; break; }
+      if (validateResult !== 'ok') {
+        const d = await awaitSkipDecision(ciId, `Validate failed on ${mod} — skip and continue?`);
+        if (d === 'stop') { stoppedAt = mod; break; }
+        continue;
+      }
     }
   }
 
   delete seqFlags[ciId];
-  runAllBtn.disabled = false;
-  solveBtn.disabled  = false;
-  validBtn.disabled  = false;
+  seqBtns.forEach(b => b.disabled = false);
+  solveBtn.disabled = false;
+  validBtn.disabled = false;
   if (fromEl) fromEl.disabled = false;
   if (toEl)   toEl.disabled   = false;
   card.querySelector('.stop-btn').style.display = 'none';
 
+  const modeLabel = mode === 'solve' ? 'solve' : mode === 'validate' ? 'validate' : 'solve + validate';
   if (stoppedAt) {
     statusEl.className   = 'ci-status failed';
-    statusEl.textContent = `❌ Sequential run stopped at ${stoppedAt}`;
+    statusEl.textContent = `❌ Sequential ${modeLabel} stopped at ${stoppedAt}`;
     card.className = 'ci-card is-failed';
   } else {
     statusEl.className   = 'ci-status success';
-    statusEl.textContent = `✅ Sequential run complete — all ${mods.length} module(s) passed`;
+    statusEl.textContent = `✅ Sequential ${modeLabel} complete — all ${mods.length} module(s) passed`;
     card.className = 'ci-card is-success';
   }
 }
@@ -842,16 +967,26 @@ function badgeHtml(state) {
 }
 
 // ── Bulk actions ───────────────────────────────────────────────────────────────
+// ── Actions dropdown ───────────────────────────────────────────────────────────
+function toggleActionsMenu(e) {
+  e.stopPropagation();
+  document.getElementById('actions-menu').classList.toggle('open');
+}
+function closeActionsMenu() {
+  document.getElementById('actions-menu').classList.remove('open');
+}
+document.addEventListener('click', closeActionsMenu);
+
 function bulkAction(stage) {
   document.querySelectorAll('.ci-card').forEach(card => {
     startStream(card.dataset.ciId, stage);
   });
 }
 
-function bulkRunAll() {
-  document.querySelectorAll('.ci-card').forEach(card => {
-    runSequential(card.dataset.ciId);
-  });
+async function bulkRunAll(mode = 'both') {
+  for (const card of document.querySelectorAll('.ci-card')) {
+    await runSequential(card.dataset.ciId, mode);
+  }
 }
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────
@@ -920,7 +1055,30 @@ async function handleSubmit(e) {
 }
 
 // ── Keyboard ───────────────────────────────────────────────────────────────────
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+// ── Log expand modal ───────────────────────────────────────────────────────────
+function openLogModal(ciId) {
+  const card = document.getElementById('card-' + ciId);
+  if (!card) return;
+  const title   = card.querySelector('.card-title')?.textContent || ciId;
+  const content = card.querySelector('.log-content')?.textContent || '';
+  document.getElementById('log-modal-title').textContent = title;
+  const pre = document.getElementById('log-modal-pre');
+  pre.textContent = content;
+  pre.scrollTop   = pre.scrollHeight;
+  openLogCiId = ciId;
+  document.getElementById('log-modal').style.display = 'flex';
+}
+
+function closeLogModal() {
+  document.getElementById('log-modal').style.display = 'none';
+  openLogCiId = null;
+}
+
+function handleLogModalClick(e) {
+  if (e.target.id === 'log-modal') closeLogModal();
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeLogModal(); } });
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 boot().catch(err => console.error('Boot failed:', err));
