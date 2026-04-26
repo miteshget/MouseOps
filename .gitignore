@@ -1,6 +1,9 @@
 # Runtime data — contains live URLs and auth tokens
 cis.json
 
+# Persisted run logs — contain CI-specific output, not for version control
+logs/
+
 # Python
 .venv/
 __pycache__/
