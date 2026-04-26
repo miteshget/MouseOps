@@ -3,8 +3,10 @@
 // ── State ──────────────────────────────────────────────────────────────────────
 const streams       = {};   // ciId → { es, mod, stage, resolve }
 const runHistory    = {};   // ciId → { [module]: { solve, validate } }
-const seqFlags      = {};   // ciId → true means user requested stop
+const seqFlags      = {};   // ciId → true means user requested stop (individual streams)
 const skipResolvers = {};   // ciId → resolve fn waiting for skip/stop decision
+const seqWatchers       = {};     // ciId → true means watchSeqRun should exit
+const activeSeqWatchers = new Set(); // ciIds with an active watchSeqRun loop
 const SEQ_PROG_KEY  = 'seq-progress';  // localStorage prefix for sequential run progress
 let editingId   = null;
 let openLogCiId = null;
@@ -34,6 +36,7 @@ async function boot() {
   renderAll(cis);
   loadHistory(cis);
   await reconnectActiveRuns();
+  await restoreSeqRuns();
 }
 
 async function reconnectActiveRuns() {
@@ -393,9 +396,12 @@ function parseValidationMsg(line, stepList) {
 
 // ── Sequential run ─────────────────────────────────────────────────────────────
 function userStop(ciId) {
-  seqFlags[ciId] = true;
+  seqWatchers[ciId] = true;                                      // kill watchSeqRun loop
+  fetch(`/api/seq/${ciId}/stop`, { method: 'POST' }).catch(() => {}); // tell server to stop
+  seqFlags[ciId] = true;                                         // stop individual stream
   stopStream(ciId);
   resolveSkip(ciId, 'stop');
+  unlockSeqCard(ciId);
 }
 
 function awaitSkipDecision(ciId, msg) {
@@ -408,11 +414,23 @@ function awaitSkipDecision(ciId, msg) {
 }
 
 function resolveSkip(ciId, decision) {
+  const card = document.getElementById('card-' + ciId);
+  if (card) card.querySelector('.skip-section').style.display = 'none';
+
+  if (activeSeqWatchers.has(ciId)) {
+    // Server-side sequential run — forward decision to backend
+    fetch(`/api/seq/${ciId}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision }),
+    }).catch(() => {});
+    return;
+  }
+
+  // Client-side (individual stream) — resolve locally
   const resolve = skipResolvers[ciId];
   if (!resolve) return;
   delete skipResolvers[ciId];
-  const card = document.getElementById('card-' + ciId);
-  if (card) card.querySelector('.skip-section').style.display = 'none';
   resolve(decision);
 }
 
@@ -445,11 +463,12 @@ function setCardModule(ciId, mod) {
 }
 
 async function runSequential(ciId, mode = 'both') {
-  const cis  = await api('GET', '/cis');
-  const ci   = cis.find(c => c.id === ciId);
   const card = document.getElementById('card-' + ciId);
   if (!card) return;
 
+  // Build the mods list from the card's from/to selectors
+  const cis  = await api('GET', '/cis');
+  const ci   = cis.find(c => c.id === ciId);
   const fromEl = card.querySelector('.seq-from');
   const toEl   = card.querySelector('.seq-to');
   const ciMods = ci && ci.modules && ci.modules.length > 1 ? ci.modules : null;
@@ -467,71 +486,153 @@ async function runSequential(ciId, mode = 'both') {
     mods = Array.from({length: toNum - fromNum + 1}, (_, i) => 'module-' + String(fromNum + i).padStart(2, '0'));
   }
 
-  await _runSeqLoop(ciId, mode, mods, 0);
+  if (!mods.length) {
+    showToast('No modules to run.', 'info');
+    return;
+  }
+
+  // Delegate the entire loop to the server
+  try {
+    await api('POST', `/seq/${ciId}`, { mode, mods });
+  } catch { return; }
+
+  lockSeqCard(ciId);
+  watchSeqRun(ciId);
 }
 
-// Core sequential loop — resumable from any index (used by runSequential and reconnect)
-async function _runSeqLoop(ciId, mode, mods, startIdx) {
+// Lock a card's controls when a sequential run is active
+function lockSeqCard(ciId) {
   const card = document.getElementById('card-' + ciId);
   if (!card) return;
+  card.querySelectorAll('.seq-btn').forEach(b => b.disabled = true);
+  card.querySelector('.btn-solve').disabled    = true;
+  card.querySelector('.btn-validate').disabled = true;
+  const fe = card.querySelector('.seq-from');
+  const te = card.querySelector('.seq-to');
+  if (fe) fe.disabled = true;
+  if (te) te.disabled = true;
+}
 
-  const seqBtns  = card.querySelectorAll('.seq-btn');
-  const solveBtn = card.querySelector('.btn-solve');
-  const validBtn = card.querySelector('.btn-validate');
-  const statusEl = card.querySelector('.ci-status');
-  const fromEl   = card.querySelector('.seq-from');
-  const toEl     = card.querySelector('.seq-to');
+function unlockSeqCard(ciId) {
+  const card = document.getElementById('card-' + ciId);
+  if (!card) return;
+  card.querySelectorAll('.seq-btn').forEach(b => b.disabled = false);
+  card.querySelector('.btn-solve').disabled    = false;
+  card.querySelector('.btn-validate').disabled = false;
+  const fe = card.querySelector('.seq-from');
+  const te = card.querySelector('.seq-to');
+  if (fe) fe.disabled = false;
+  if (te) te.disabled = false;
+  card.querySelector('.stop-btn').style.display = 'none';
+}
 
-  seqFlags[ciId] = false;
-  seqBtns.forEach(b => b.disabled = true);
-  solveBtn.disabled = true;
-  validBtn.disabled = true;
-  if (fromEl) fromEl.disabled = true;
-  if (toEl)   toEl.disabled   = true;
+// Follows the server-side sequential run, connecting to each module stream as it starts
+async function watchSeqRun(ciId) {
+  delete seqWatchers[ciId];
+  activeSeqWatchers.add(ciId);
+  let lastKey = null;
 
-  let stoppedAt = null;
-
-  for (let i = startIdx; i < mods.length; i++) {
-    if (seqFlags[ciId]) { stoppedAt = mods[i]; break; }
-
-    const mod = mods[i];
-    setCardModule(ciId, mod);
-
-    // Persist progress so a page refresh can resume from here
-    localStorage.setItem(`${SEQ_PROG_KEY}-${ciId}`, JSON.stringify({ mode, mods, currentIdx: i }));
-
-    if (mode !== 'validate') {
-      const r = await runStage(ciId, 'solve', mod, i, mods.length, statusEl);
-      if (r === 'stop') { stoppedAt = mod; break; }
-      if (r === 'skip') continue;
+  while (true) {
+    // Exit if user clicked Stop
+    if (seqWatchers[ciId]) {
+      delete seqWatchers[ciId];
+      unlockSeqCard(ciId);
+      const card = document.getElementById('card-' + ciId);
+      if (card) {
+        const s = card.querySelector('.ci-status');
+        s.className   = 'ci-status';
+        s.textContent = '⏸ Stopped';
+        card.className = 'ci-card';
+      }
+      break;
     }
 
-    if (mode !== 'solve') {
-      const r = await runStage(ciId, 'validate', mod, i, mods.length, statusEl);
-      if (r === 'stop') { stoppedAt = mod; break; }
-      if (r === 'skip') continue;
+    // Poll server for current sequential run state
+    let seq;
+    try {
+      const runs = await fetch('/api/seq-runs').then(r => r.json());
+      seq = runs.find(r => r.ci_id === ciId);
+    } catch { break; }
+
+    if (!seq) {
+      // Run finished or was stopped on the server
+      unlockSeqCard(ciId);
+      const card = document.getElementById('card-' + ciId);
+      if (card) {
+        card.querySelector('.skip-section').style.display = 'none';
+        const statusEl = card.querySelector('.ci-status');
+        statusEl.className   = 'ci-status success';
+        statusEl.textContent = `✅ Sequential run complete`;
+        card.className = 'ci-card is-success';
+      }
+      break;
+    }
+
+    // ── Paused waiting for skip/rerun/stop decision ───────────────────────────
+    if (seq.paused) {
+      const card = document.getElementById('card-' + ciId);
+      if (card) {
+        const section = card.querySelector('.skip-section');
+        section.querySelector('.skip-msg').textContent =
+          `${seq.pausedStage} failed on ${seq.pausedMod} — what next?`;
+        section.style.display = '';
+        const statusEl = card.querySelector('.ci-status');
+        statusEl.className   = 'ci-status failed';
+        statusEl.textContent = `❌ ${seq.pausedStage} failed on ${seq.pausedMod}`;
+        card.className = 'ci-card is-failed';
+      }
+      await new Promise(r => setTimeout(r, 800));
+      continue;
+    }
+
+    // Hide banner if we were previously paused
+    const card2 = document.getElementById('card-' + ciId);
+    if (card2) card2.querySelector('.skip-section').style.display = 'none';
+
+    // ── Connect to current module stream ──────────────────────────────────────
+    const { currentMod, currentStage } = seq;
+    const key = `${currentMod}:${currentStage}`;
+
+    // Reconnect when: new module/stage, OR same key but stream ended (rerun case)
+    const needsConnect = currentMod && currentStage && (key !== lastKey || !streams[ciId]);
+
+    if (needsConnect) {
+      lastKey = key;
+      const card = document.getElementById('card-' + ciId);
+      if (card) {
+        const statusEl = card.querySelector('.ci-status');
+        const label = currentStage === 'solve' ? 'Solving' : 'Validating';
+        statusEl.className = 'ci-status running';
+        statusEl.innerHTML = `<span class="spinner"></span> [${seq.currentIdx + 1}/${seq.total}] ${label} ${currentMod}…`;
+        card.className = 'ci-card is-running';
+        setCardModule(ciId, currentMod);
+      }
+      await startStream(ciId, currentStage, currentMod);
+      await new Promise(r => setTimeout(r, 500));
+    } else {
+      await new Promise(r => setTimeout(r, 800));
     }
   }
 
-  // Clear progress — run finished or stopped
-  localStorage.removeItem(`${SEQ_PROG_KEY}-${ciId}`);
-  delete seqFlags[ciId];
-  seqBtns.forEach(b => b.disabled = false);
-  solveBtn.disabled = false;
-  validBtn.disabled = false;
-  if (fromEl) fromEl.disabled = false;
-  if (toEl)   toEl.disabled   = false;
-  card.querySelector('.stop-btn').style.display = 'none';
+  activeSeqWatchers.delete(ciId);
+}
 
-  const modeLabel = mode === 'solve' ? 'solve' : mode === 'validate' ? 'validate' : 'solve + validate';
-  if (stoppedAt) {
-    statusEl.className   = 'ci-status failed';
-    statusEl.textContent = `❌ Sequential ${modeLabel} stopped at ${stoppedAt}`;
-    card.className = 'ci-card is-failed';
-  } else {
-    statusEl.className   = 'ci-status success';
-    statusEl.textContent = `✅ Sequential ${modeLabel} complete — all ${mods.length} module(s) passed`;
-    card.className = 'ci-card is-success';
+// Called from boot() — restores any sequential runs that are still running on the server
+async function restoreSeqRuns() {
+  let runs;
+  try {
+    const res = await fetch('/api/seq-runs');
+    if (!res.ok) return;
+    runs = await res.json();
+  } catch { return; }
+
+  for (const seq of runs) {
+    const card = document.getElementById('card-' + seq.ci_id);
+    if (!card) continue;
+
+    lockSeqCard(seq.ci_id);
+    showToast(`Reconnected to sequential ${seq.mode} run at module ${seq.currentIdx + 1}/${seq.total}`, 'info');
+    watchSeqRun(seq.ci_id);
   }
 }
 
@@ -647,6 +748,7 @@ async function bulkRunAll(mode = 'both') {
     await runSequential(card.dataset.ciId, mode);
   }
 }
+
 
 // ── Export / Import ────────────────────────────────────────────────────────────
 async function exportConfig() {
