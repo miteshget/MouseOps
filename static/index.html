@@ -691,12 +691,25 @@ async function runSequential(ciId) {
   const card = document.getElementById('card-' + ciId);
   if (!card) return;
 
-  const mods = ci && ci.modules && ci.modules.length ? ci.modules : null;
-  if (!mods) {
-    const statusEl = card.querySelector('.ci-status');
-    statusEl.className   = 'ci-status failed';
-    statusEl.textContent = '❌ No modules configured — add modules in Edit to use Run All';
-    return;
+  const fromEl  = card.querySelector('.seq-from');
+  const toEl    = card.querySelector('.seq-to');
+  const ciMods  = ci && ci.modules && ci.modules.length > 1 ? ci.modules : null;
+
+  let mods, startIdx, endIdx;
+  if (ciMods) {
+    // Configured modules — use dropdown values to slice the list
+    const startMod = fromEl ? fromEl.value : ciMods[0];
+    const endMod   = toEl   ? toEl.value   : ciMods[ciMods.length - 1];
+    startIdx = Math.max(0, ciMods.indexOf(startMod));
+    endIdx   = Math.min(ciMods.length - 1, Math.max(startIdx, ciMods.indexOf(endMod)));
+    mods     = ciMods.slice(startIdx, endIdx + 1);
+  } else {
+    // No configured modules — generate list from number inputs
+    const fromNum = parseInt(fromEl?.value) || 0;
+    const toNum   = Math.max(fromNum, parseInt(toEl?.value) || fromNum);
+    mods      = Array.from({length: toNum - fromNum + 1}, (_, i) => 'module-' + String(fromNum + i).padStart(2, '0'));
+    startIdx  = 0;
+    endIdx    = mods.length - 1;
   }
 
   seqFlags[ciId]   = false;
@@ -704,18 +717,12 @@ async function runSequential(ciId) {
   const solveBtn   = card.querySelector('.btn-solve');
   const validBtn   = card.querySelector('.btn-validate');
   const statusEl   = card.querySelector('.ci-status');
-  const fromSelect = card.querySelector('.seq-from');
-  const toSelect   = card.querySelector('.seq-to');
-  const startMod   = fromSelect ? fromSelect.value : mods[0];
-  const endMod     = toSelect   ? toSelect.value   : mods[mods.length - 1];
-  const startIdx   = Math.max(0, mods.indexOf(startMod));
-  const endIdx     = toSelect ? Math.min(mods.length - 1, Math.max(startIdx, mods.indexOf(endMod))) : mods.length - 1;
 
   runAllBtn.disabled = true;
   solveBtn.disabled  = true;
   validBtn.disabled  = true;
-  if (fromSelect) fromSelect.disabled = true;
-  if (toSelect)   toSelect.disabled   = true;
+  if (fromEl) fromEl.disabled = true;
+  if (toEl)   toEl.disabled   = true;
 
   let stoppedAt = null;
 
@@ -752,8 +759,8 @@ async function runSequential(ciId) {
   runAllBtn.disabled = false;
   solveBtn.disabled  = false;
   validBtn.disabled  = false;
-  if (fromSelect) fromSelect.disabled = false;
-  if (toSelect)   toSelect.disabled   = false;
+  if (fromEl) fromEl.disabled = false;
+  if (toEl)   toEl.disabled   = false;
   card.querySelector('.stop-btn').style.display = 'none';
 
   if (stoppedAt) {
