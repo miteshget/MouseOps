@@ -427,7 +427,10 @@ function buildCard(ci) {
       `<select class="seq-from">${mods.map(m => `<option value="${x(m)}">${x(m)}</option>`).join('')}</select>` +
       `<span class="seq-from-label">to</span>` +
       `<select class="seq-to">${mods.map((m, i) => `<option value="${x(m)}"${i === mods.length - 1 ? ' selected' : ''}>${x(m)}</option>`).join('')}</select>`
-    : '';
+    : `<span class="seq-from-label">from</span>` +
+      `<input class="seq-from" type="number" min="0" max="99" value="0" style="width:54px">` +
+      `<span class="seq-from-label">to</span>` +
+      `<input class="seq-to" type="number" min="0" max="99" value="21" style="width:54px">`;
 
   card.innerHTML = `
     <div class="card-header">
