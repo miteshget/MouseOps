@@ -1,0 +1,7 @@
+# Runtime data — contains live URLs and auth tokens
+cis.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
