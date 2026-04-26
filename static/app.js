@@ -5,6 +5,7 @@ const streams       = {};   // ciId → { es, mod, stage, resolve }
 const runHistory    = {};   // ciId → { [module]: { solve, validate } }
 const seqFlags      = {};   // ciId → true means user requested stop
 const skipResolvers = {};   // ciId → resolve fn waiting for skip/stop decision
+const SEQ_PROG_KEY  = 'seq-progress';  // localStorage prefix for sequential run progress
 let editingId   = null;
 let openLogCiId = null;
 
@@ -45,12 +46,27 @@ async function reconnectActiveRuns() {
 
   for (const run of active) {
     const card = document.getElementById('card-' + run.ci_id);
-    if (!card || streams[run.ci_id]) continue;   // not found or already streaming
+    if (!card || streams[run.ci_id]) continue;
 
-    // Reconnect — the backend will replay its buffer then continue live
-    startStream(run.ci_id, run.stage, run.module);
+    // Check if this was part of a sequential run
+    const seqState = JSON.parse(localStorage.getItem(`${SEQ_PROG_KEY}-${run.ci_id}`) || 'null');
 
-    // After a short delay, prepend the persisted log so the user sees history
+    if (seqState) {
+      // Lock card UI exactly as _runSeqLoop would have done
+      card.querySelectorAll('.seq-btn').forEach(b => b.disabled = true);
+      card.querySelector('.btn-solve').disabled    = true;
+      card.querySelector('.btn-validate').disabled = true;
+      const _fe = card.querySelector('.seq-from');
+      const _te = card.querySelector('.seq-to');
+      if (_fe) _fe.disabled = true;
+      if (_te) _te.disabled = true;
+      showToast(`Reconnecting sequential ${seqState.mode} at ${run.module}…`, 'info');
+    }
+
+    // Reconnect — backend replays buffer then continues live
+    const p = startStream(run.ci_id, run.stage, run.module);
+
+    // Prepend persisted log after a short delay so the user sees history
     setTimeout(async () => {
       try {
         const res = await fetch(
@@ -64,6 +80,31 @@ async function reconnectActiveRuns() {
         }
       } catch { /* ignore */ }
     }, 300);
+
+    if (seqState) {
+      // When current module finishes, resume sequential run from the next module
+      p.then(outcome => {
+        const nextIdx = seqState.currentIdx + 1;
+        if (outcome === 'ok' && nextIdx < seqState.mods.length && !seqFlags[run.ci_id]) {
+          showToast(`Resuming sequential ${seqState.mode} from ${seqState.mods[nextIdx]}`, 'info');
+          _runSeqLoop(run.ci_id, seqState.mode, seqState.mods, nextIdx);
+        } else {
+          // Stopped, failed, or finished — clear saved progress and unlock
+          localStorage.removeItem(`${SEQ_PROG_KEY}-${run.ci_id}`);
+          const c = document.getElementById('card-' + run.ci_id);
+          if (c) {
+            c.querySelectorAll('.seq-btn').forEach(b => b.disabled = false);
+            c.querySelector('.btn-solve').disabled    = false;
+            c.querySelector('.btn-validate').disabled = false;
+            const fe = c.querySelector('.seq-from');
+            const te = c.querySelector('.seq-to');
+            if (fe) fe.disabled = false;
+            if (te) te.disabled = false;
+            c.querySelector('.stop-btn').style.display = 'none';
+          }
+        }
+      });
+    }
   }
 }
 
@@ -426,12 +467,22 @@ async function runSequential(ciId, mode = 'both') {
     mods = Array.from({length: toNum - fromNum + 1}, (_, i) => 'module-' + String(fromNum + i).padStart(2, '0'));
   }
 
-  seqFlags[ciId] = false;
+  await _runSeqLoop(ciId, mode, mods, 0);
+}
+
+// Core sequential loop — resumable from any index (used by runSequential and reconnect)
+async function _runSeqLoop(ciId, mode, mods, startIdx) {
+  const card = document.getElementById('card-' + ciId);
+  if (!card) return;
+
   const seqBtns  = card.querySelectorAll('.seq-btn');
   const solveBtn = card.querySelector('.btn-solve');
   const validBtn = card.querySelector('.btn-validate');
   const statusEl = card.querySelector('.ci-status');
+  const fromEl   = card.querySelector('.seq-from');
+  const toEl     = card.querySelector('.seq-to');
 
+  seqFlags[ciId] = false;
   seqBtns.forEach(b => b.disabled = true);
   solveBtn.disabled = true;
   validBtn.disabled = true;
@@ -440,11 +491,14 @@ async function runSequential(ciId, mode = 'both') {
 
   let stoppedAt = null;
 
-  for (let i = 0; i < mods.length; i++) {
+  for (let i = startIdx; i < mods.length; i++) {
     if (seqFlags[ciId]) { stoppedAt = mods[i]; break; }
 
     const mod = mods[i];
     setCardModule(ciId, mod);
+
+    // Persist progress so a page refresh can resume from here
+    localStorage.setItem(`${SEQ_PROG_KEY}-${ciId}`, JSON.stringify({ mode, mods, currentIdx: i }));
 
     if (mode !== 'validate') {
       const r = await runStage(ciId, 'solve', mod, i, mods.length, statusEl);
@@ -459,6 +513,8 @@ async function runSequential(ciId, mode = 'both') {
     }
   }
 
+  // Clear progress — run finished or stopped
+  localStorage.removeItem(`${SEQ_PROG_KEY}-${ciId}`);
   delete seqFlags[ciId];
   seqBtns.forEach(b => b.disabled = false);
   solveBtn.disabled = false;
@@ -537,17 +593,38 @@ function renderModuleSummary(ciId) {
       const stale = configuredMods.size > 0 && !configuredMods.has(m);
       return `<div class="mh-row${stale ? ' mh-stale-row' : ''}">` +
         `<span class="mh-name">${x(m)}${stale ? ` <span class="mh-stale-badge" title="Module no longer in CI config">⚠</span>` : ''}</span>` +
-        `<span>${badgeHtml(history[m].solve)}</span>` +
-        `<span>${badgeHtml(history[m].validate)}</span>` +
+        `<span>${badgeHtml(history[m].solve,    ciId, m, 'solve')}</span>` +
+        `<span>${badgeHtml(history[m].validate, ciId, m, 'validate')}</span>` +
         `</div>`;
     }).join('');
 }
 
-function badgeHtml(state) {
+function badgeHtml(state, ciId, mod, stage) {
   if (state === 'running') return `<span class="mh-badge mh-running"><span class="spinner" style="width:9px;height:9px;border-width:1.5px"></span> running</span>`;
-  if (state === 'ok')      return `<span class="mh-badge mh-ok">✅ Pass</span>`;
-  if (state === 'fail')    return `<span class="mh-badge mh-fail">❌ Fail</span>`;
+  const logBtn = (state === 'ok' || state === 'fail') && ciId
+    ? `<button class="mh-log-btn" title="View log" onclick="loadLogForModule('${ciId}','${x(mod)}','${stage}')">📄</button>`
+    : '';
+  if (state === 'ok')   return `<span class="mh-badge mh-ok">✅ Pass</span>${logBtn}`;
+  if (state === 'fail') return `<span class="mh-badge mh-fail">❌ Fail</span>${logBtn}`;
   return `<span class="mh-none">—</span>`;
+}
+
+async function loadLogForModule(ciId, mod, stage) {
+  try {
+    const res = await fetch(`/api/logs/${ciId}/${stage}/${encodeURIComponent(mod)}`);
+    if (!res.ok) { showToast('No log found for this module.', 'info'); return; }
+    const text  = await res.text();
+    const card  = document.getElementById('card-' + ciId);
+    const title = card?.querySelector('.card-title')?.textContent || ciId;
+    document.getElementById('log-modal-title').textContent = `${title} — ${stage} ${mod}`;
+    const pre = document.getElementById('log-modal-pre');
+    pre.textContent = text;
+    pre.scrollTop   = pre.scrollHeight;
+    openLogCiId = null;
+    document.getElementById('log-modal').style.display = 'flex';
+  } catch (err) {
+    showToast('Failed to load log: ' + err.message);
+  }
 }
 
 // ── Actions dropdown ───────────────────────────────────────────────────────────

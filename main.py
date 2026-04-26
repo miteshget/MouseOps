@@ -14,19 +14,23 @@ from typing import Optional
 
 # ── Validation patterns ───────────────────────────────────────────────────────
 _URL_RE    = re.compile(r'^https?://.{1,490}$', re.IGNORECASE)
-_MODULE_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]{0,99}$')  # no / or ..
+_MODULE_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]{0,99}$')
 
 DATA_FILE = Path("cis.json")
 LOGS_DIR  = Path("logs")
 
-# Serialize writes to cis.json — prevents corruption under concurrent requests
 _file_lock = threading.Lock()
 
-# Active-run registry for multi-window / reconnect support.
+# Active-run registry.
 # run_key (ci_id, stage, module) → {
-#   "subscribers": list[asyncio.Queue],   ← queues for late-joining clients
-#   "buffer":      deque[bytes],          ← recent SSE events for replay
+#   "subscribers": list[asyncio.Queue],
+#   "buffer":      deque[bytes],        ← replay buffer for reconnecting clients
+#   "done":        bool,
 # }
+# The background task (_bg_stream) owns the Showroom connection and
+# populates this dict. Client connections only subscribe — they never
+# control the upstream connection, so browser refresh / multi-window
+# all work transparently.
 _run_active: dict = {}
 
 
@@ -65,7 +69,7 @@ class CIConfig(BaseModel):
     def _url(cls, v: str) -> str:
         v = v.strip().rstrip("/")
         if not _URL_RE.match(v):
-            raise ValueError("URL must start with http:// or https:// and be at most 500 characters")
+            raise ValueError("URL must start with http:// or https://")
         return v
 
     @field_validator("token")
@@ -82,22 +86,19 @@ class CIConfig(BaseModel):
             raise ValueError("Cannot specify more than 500 modules")
         for mod in v:
             if not _MODULE_RE.match(mod):
-                raise ValueError(
-                    f'Invalid module name "{mod}" — use letters, numbers, hyphens and dots only'
-                )
+                raise ValueError(f'Invalid module name "{mod}"')
         return v
 
 
-# ── Health check ──────────────────────────────────────────────────────────────
+# ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
     return {"status": "ok", "cis": len(load_cis())}
 
 
-# ── Active runs (for reconnect on refresh / multiple windows) ─────────────────
+# ── Active runs ───────────────────────────────────────────────────────────────
 @app.get("/api/active-runs")
 def active_runs():
-    # Only return runs that are genuinely still streaming (not in cleanup phase)
     return [
         {"ci_id": k[0], "stage": k[1], "module": k[2]}
         for k, v in _run_active.items()
@@ -157,7 +158,78 @@ def get_log(
     return PlainTextResponse(log_file.read_text(errors="replace"))
 
 
-# ── SSE proxy ─────────────────────────────────────────────────────────────────
+# ── Background stream task ────────────────────────────────────────────────────
+async def _bg_stream(run_key: tuple, url: str, req_headers: dict,
+                     state: dict, log_fh) -> None:
+    """
+    Owns the Showroom SSE connection independently of any client.
+    Clients only subscribe to events — they can connect/disconnect freely
+    without affecting this task or each other.
+    """
+    def broadcast(event: bytes) -> None:
+        state["buffer"].append(event)
+        for q in state["subscribers"]:
+            q.put_nowait(event)
+
+    def tee(raw: str) -> None:
+        if not raw or raw in ("__DONE__", "__DONE_FAIL__"):
+            return
+        try:
+            text = json.loads(raw)
+        except Exception:
+            text = raw
+        log_fh.write(str(text) + "\n")
+        log_fh.flush()
+
+    def emit(raw: str) -> None:
+        broadcast(f"data: {raw}\n\n".encode())
+
+    try:
+        async with httpx.AsyncClient(
+            verify=False,
+            timeout=httpx.Timeout(connect=10.0, read=None, write=None, pool=None),
+        ) as client:
+            async with client.stream("GET", url, headers=req_headers) as resp:
+                if resp.status_code != 200:
+                    await resp.aread()
+                    msg = f"❌ Showroom unreachable — HTTP {resp.status_code} from {url}"
+                    tee(msg)
+                    emit(json.dumps(msg))
+                    emit("__DONE_FAIL__")
+                    return
+                async for chunk in resp.aiter_bytes():
+                    for line in chunk.decode("utf-8", errors="replace").split("\n"):
+                        if line.startswith("data: "):
+                            raw = line[6:].strip()
+                            tee(raw)
+                            broadcast(f"data: {raw}\n\n".encode())
+    except httpx.ConnectError:
+        msg = f"❌ Cannot connect to Showroom at {url}"
+        tee(msg)
+        emit(json.dumps(msg))
+        emit("__DONE_FAIL__")
+    except Exception as e:
+        msg = f"❌ Proxy error: {e}"
+        tee(msg)
+        emit(json.dumps(msg))
+        emit("__DONE_FAIL__")
+    finally:
+        log_fh.close()
+        state["done"] = True
+        # Unblock any subscribers still waiting
+        term = b"data: __DONE_FAIL__\n\n"
+        for q in list(state["subscribers"]):
+            try:
+                q.put_nowait(term)
+            except Exception:
+                pass
+        async def _cleanup():
+            await asyncio.sleep(3)
+            _run_active.pop(run_key, None)
+        asyncio.create_task(_cleanup())
+
+
+# ── SSE endpoint — subscribe only ─────────────────────────────────────────────
 @app.get("/api/stream/{ci_id}/{stage}/{module_name}")
 async def proxy_stream(
     ci_id:       str = FPath(..., pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
@@ -166,127 +238,55 @@ async def proxy_stream(
 ):
     run_key = (ci_id, stage, module_name)
 
-    # ── Late joiner: replay buffer then subscribe to live events ──────────────
-    if run_key in _run_active and not _run_active[run_key].get("done"):
-        async def late_join():
-            q = asyncio.Queue()
-            state = _run_active[run_key]
-            state["subscribers"].append(q)
-            done_in_buffer = False
-            try:
-                for event in list(state["buffer"]):    # replay buffered history
-                    yield event
-                    if b"__DONE__" in event:           # run already finished
-                        done_in_buffer = True
-                        break
-                if not done_in_buffer and not state.get("done"):
-                    while True:                        # stream live events
-                        event = await q.get()
-                        yield event
-                        if b"__DONE__" in event:
-                            break
-            finally:
-                try:
-                    state["subscribers"].remove(q)
-                except ValueError:
-                    pass
+    if run_key not in _run_active or _run_active[run_key].get("done"):
+        # Start a fresh background task
+        cis = load_cis()
+        ci = next((c for c in cis if c["id"] == ci_id), None)
+        if not ci:
+            raise HTTPException(status_code=404, detail="CI not found")
 
-        return StreamingResponse(
-            late_join(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        url = f"{ci['url'].rstrip('/')}/stream/{stage}/{module_name}"
+        req_headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
+        if ci.get("token"):
+            req_headers["Authorization"] = f"Bearer {ci['token']}"
 
-    # ── Primary stream ────────────────────────────────────────────────────────
-    cis = load_cis()
-    ci = next((c for c in cis if c["id"] == ci_id), None)
-    if not ci:
-        raise HTTPException(status_code=404, detail="CI not found")
+        state: dict = {"subscribers": [], "buffer": deque(maxlen=1000), "done": False}
+        _run_active[run_key] = state
 
-    url = f"{ci['url'].rstrip('/')}/stream/{stage}/{module_name}"
-    req_headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
-    if ci.get("token"):
-        req_headers["Authorization"] = f"Bearer {ci['token']}"
-
-    state: dict = {"subscribers": [], "buffer": deque(maxlen=1000), "done": False}
-    _run_active[run_key] = state
-
-    def broadcast(event: bytes) -> None:
-        """Add event to replay buffer and push to all late-joining subscribers."""
-        state["buffer"].append(event)
-        for q in state["subscribers"]:
-            q.put_nowait(event)
-
-    async def event_stream():
         log_dir = LOGS_DIR / ci_id / module_name
         log_dir.mkdir(parents=True, exist_ok=True)
         log_fh = open(log_dir / f"{stage}.log", "w", encoding="utf-8")
 
-        def tee(raw_data: str) -> None:
-            if not raw_data or raw_data in ("__DONE__", "__DONE_FAIL__"):
-                return
-            try:
-                text = json.loads(raw_data)
-            except Exception:
-                text = raw_data
-            log_fh.write(str(text) + "\n")
-            log_fh.flush()
+        asyncio.create_task(_bg_stream(run_key, url, req_headers, state, log_fh))
 
-        def emit(raw_data: str) -> bytes:
-            """Format as an SSE event, broadcast, and return the bytes."""
-            event = f"data: {raw_data}\n\n".encode()
-            broadcast(event)
-            return event
+    state = _run_active[run_key]
 
+    async def client_stream():
+        q = asyncio.Queue()
+        state["subscribers"].append(q)
+        done_in_buffer = False
         try:
-            async with httpx.AsyncClient(
-                verify=False,
-                timeout=httpx.Timeout(connect=10.0, read=None, write=None, pool=None),
-            ) as client:
-                async with client.stream("GET", url, headers=req_headers) as resp:
-                    if resp.status_code != 200:
-                        body = await resp.aread()
-                        msg = f"❌ Showroom unreachable — HTTP {resp.status_code} from {url}"
-                        tee(msg)
-                        yield emit(json.dumps(msg))
-                        yield emit("__DONE_FAIL__")
-                        return
-                    async for chunk in resp.aiter_bytes():
-                        # Parse each SSE line: tee to log, broadcast to subscribers
-                        for line in chunk.decode("utf-8", errors="replace").split("\n"):
-                            if line.startswith("data: "):
-                                raw = line[6:].strip()
-                                tee(raw)
-                                broadcast(f"data: {raw}\n\n".encode())
-                        yield chunk   # primary client gets the original chunk
-        except httpx.ConnectError:
-            msg = f"❌ Cannot connect to Showroom at {url}"
-            tee(msg)
-            yield emit(json.dumps(msg))
-            yield emit("__DONE_FAIL__")
-        except Exception as e:
-            msg = f"❌ Proxy error: {e}"
-            tee(msg)
-            yield emit(json.dumps(msg))
-            yield emit("__DONE_FAIL__")
+            # Replay history first
+            for event in list(state["buffer"]):
+                yield event
+                if b"__DONE__" in event:
+                    done_in_buffer = True
+                    break
+            # Then stream live events
+            if not done_in_buffer and not state.get("done"):
+                while True:
+                    event = await q.get()
+                    yield event
+                    if b"__DONE__" in event:
+                        break
         finally:
-            log_fh.close()
-            # Mark done and notify any late joiners that were still waiting
-            state["done"] = True
-            stuck_term = b"data: __DONE_FAIL__\n\n"
-            for q in list(state["subscribers"]):
-                try:
-                    q.put_nowait(stuck_term)
-                except Exception:
-                    pass
-            # Remove from active registry after a short window for any last late joiners
-            async def _cleanup():
-                await asyncio.sleep(3)
-                _run_active.pop(run_key, None)
-            asyncio.create_task(_cleanup())
+            try:
+                state["subscribers"].remove(q)
+            except ValueError:
+                pass
 
     return StreamingResponse(
-        event_stream(),
+        client_stream(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
