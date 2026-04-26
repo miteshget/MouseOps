@@ -311,6 +311,7 @@ body {
   <div class="header-actions">
     <button class="btn btn-outline" onclick="bulkAction('solve')">🚀 Solve All</button>
     <button class="btn btn-outline" onclick="bulkAction('validate')">✓ Validate All</button>
+    <button class="btn btn-outline" onclick="bulkRunAll()">▶▶ Run All</button>
     <button class="btn btn-primary" onclick="openModal()">＋ Add CI</button>
   </div>
 </header>
@@ -844,6 +845,12 @@ function badgeHtml(state) {
 function bulkAction(stage) {
   document.querySelectorAll('.ci-card').forEach(card => {
     startStream(card.dataset.ciId, stage);
+  });
+}
+
+function bulkRunAll() {
+  document.querySelectorAll('.ci-card').forEach(card => {
+    runSequential(card.dataset.ciId);
   });
 }
 
