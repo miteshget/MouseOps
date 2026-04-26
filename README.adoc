@@ -1,0 +1,164 @@
+= MouseOps
+Mitesh, The Mouse <mitsharm@redhat.com>
+:toc: left
+:toc-title: Contents
+:icons: font
+
+A local web dashboard for managing multiple RHDP Showroom CI instances.
+Run solve and validate actions from one place instead of clicking through each Showroom tab individually.
+
+== Requirements
+
+* Python 3.11+
+* Network access to your Showroom instances
+
+== Getting Started
+
+[source,bash]
+----
+cd ~/office_work/MouseOps
+bash run.sh
+----
+
+Open http://127.0.0.1:8765 in your browser.
+
+`run.sh` creates a `.venv` virtualenv and installs dependencies on first run.
+Subsequent runs skip straight to starting the server.
+
+== Adding a CI Instance
+
+. Click *+ Add CI* in the top-right corner.
+. Fill in the form:
++
+[cols="1,3"]
+|===
+| Field | Description
+
+| *Name*
+| A label to identify the CI, e.g. `LB1237 - RHEL10 - h9lhq`
+
+| *Showroom URL*
+| The base URL of the Showroom, e.g. `https://showroom.apps.cluster.example.com`
+
+| *Auth Token*
+| Bearer token if your Showroom requires authentication. Leave blank if not needed.
+
+| *Modules*
+| Comma-separated list of modules, e.g. `module-01,module-02,module-03`.
+  Use *Auto-fill* to generate a range (see below).
+|===
+
+. Click *Add CI*.
+
+=== Auto-filling Modules
+
+Instead of typing modules manually, use the *Auto-fill* helper:
+
+. Enter the start number in the *from* field (use `0` if modules start at `module-00`).
+. Enter the end number in the *to* field.
+. Click *Fill* — the modules field populates automatically with zero-padded names.
+
+Example: `from 0 to 7` → `module-00,module-01,...,module-07`
+
+== Running Actions
+
+Each CI card has two action buttons:
+
+[cols="1,3"]
+|===
+| Button | Action
+
+| *🚀 Solve*
+| Runs the solve playbook for the selected module.
+
+| *✓ Validate*
+| Runs the validate playbook for the selected module.
+|===
+
+Select the target module from the *Module* dropdown before clicking.
+
+=== Bulk Actions
+
+Use *🚀 Solve All* or *✓ Validate All* in the top header to trigger the selected module on every CI card simultaneously.
+
+== Sequential Run (Run All Modules)
+
+The *▶▶ Run All* button runs every module in order — solve first, then validate — stopping if a step fails.
+
+=== Selecting a Range
+
+Use the *from* and *to* dropdowns next to *▶▶ Run All* to run a subset of modules.
+
+Example: set `from module-03 to module-10` to skip the first two modules and run only modules 03–10.
+
+=== Skip & Continue
+
+When a module fails during a sequential run, MouseOps pauses and shows two options:
+
+[cols="1,3"]
+|===
+| Button | Behaviour
+
+| *⏭ Skip & Continue*
+| Skips the failed module and continues with the next one.
+  The failed module stays marked ❌ in the summary table.
+
+| *■ Stop*
+| Stops the sequential run immediately.
+|===
+
+=== Stopping a Run
+
+Click *■ Stop* at any point to cancel the current stream or sequential run.
+
+== Module Summary Table
+
+After any action, a summary table appears on the card showing solve and validate status per module:
+
+[cols="1,1,1"]
+|===
+| Module | Solve | Validate
+
+| module-01
+| ✅ Pass
+| ✅ Pass
+
+| module-02
+| ❌ Fail
+| —
+|===
+
+The table persists across page refreshes.
+Re-running a module updates its row in-place.
+
+== Managing CI Instances
+
+* *✎ Edit* — update the name, URL, token, or module list.
+* *✕ Remove* — delete the CI and clear its history.
+* Editing a CI and leaving the token field blank keeps the existing token.
+
+== Data Storage
+
+CI configurations (name, URL, token, modules) are saved to `cis.json` in the project directory.
+Module run history is stored in browser `localStorage`.
+
+NOTE: `cis.json` is excluded from version control via `.gitignore` as it may contain auth tokens and environment-specific URLs.
+
+== Troubleshooting
+
+[cols="1,3"]
+|===
+| Symptom | Fix
+
+| *❌ Showroom unreachable — HTTP 404*
+| The Showroom URL or module name is wrong. Check the URL in Edit and verify the module exists on the Showroom.
+
+| *❌ Cannot connect to Showroom*
+| The Showroom is not running or the URL is unreachable from your machine. Check VPN/network access.
+
+| *Module summary gone after refresh*
+| `localStorage` was cleared. Re-run the modules to rebuild the summary.
+
+| *Virtualenv errors on first run*
+| Ensure Python 3.11+ is on your `PATH`: `python3 --version`
+|===
