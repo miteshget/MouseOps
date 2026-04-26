@@ -97,9 +97,11 @@ def health():
 # ── Active runs (for reconnect on refresh / multiple windows) ─────────────────
 @app.get("/api/active-runs")
 def active_runs():
+    # Only return runs that are genuinely still streaming (not in cleanup phase)
     return [
         {"ci_id": k[0], "stage": k[1], "module": k[2]}
-        for k in _run_active
+        for k, v in _run_active.items()
+        if not v.get("done")
     ]
 
 
@@ -165,19 +167,24 @@ async def proxy_stream(
     run_key = (ci_id, stage, module_name)
 
     # ── Late joiner: replay buffer then subscribe to live events ──────────────
-    if run_key in _run_active:
+    if run_key in _run_active and not _run_active[run_key].get("done"):
         async def late_join():
             q = asyncio.Queue()
             state = _run_active[run_key]
             state["subscribers"].append(q)
+            done_in_buffer = False
             try:
-                for event in list(state["buffer"]):   # replay recent history
+                for event in list(state["buffer"]):    # replay buffered history
                     yield event
-                while True:                            # then stream live
-                    event = await q.get()
-                    yield event
-                    if b"__DONE__" in event:
+                    if b"__DONE__" in event:           # run already finished
+                        done_in_buffer = True
                         break
+                if not done_in_buffer and not state.get("done"):
+                    while True:                        # stream live events
+                        event = await q.get()
+                        yield event
+                        if b"__DONE__" in event:
+                            break
             finally:
                 try:
                     state["subscribers"].remove(q)
@@ -201,7 +208,7 @@ async def proxy_stream(
     if ci.get("token"):
         req_headers["Authorization"] = f"Bearer {ci['token']}"
 
-    state: dict = {"subscribers": [], "buffer": deque(maxlen=1000)}
+    state: dict = {"subscribers": [], "buffer": deque(maxlen=1000), "done": False}
     _run_active[run_key] = state
 
     def broadcast(event: bytes) -> None:
@@ -264,7 +271,15 @@ async def proxy_stream(
             yield emit("__DONE_FAIL__")
         finally:
             log_fh.close()
-            # Keep the run registered briefly so late joiners get the final events
+            # Mark done and notify any late joiners that were still waiting
+            state["done"] = True
+            stuck_term = b"data: __DONE_FAIL__\n\n"
+            for q in list(state["subscribers"]):
+                try:
+                    q.put_nowait(stuck_term)
+                except Exception:
+                    pass
+            # Remove from active registry after a short window for any last late joiners
             async def _cleanup():
                 await asyncio.sleep(3)
                 _run_active.pop(run_key, None)
