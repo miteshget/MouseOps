@@ -391,6 +391,9 @@ body {
         <div class="drop-item" onclick="bulkRunAll('solve');closeActionsMenu()">▶ Solve All <small style="margin-left:auto;opacity:.6">full range</small></div>
         <div class="drop-item" onclick="bulkRunAll('validate');closeActionsMenu()">▶ Validate All <small style="margin-left:auto;opacity:.6">full range</small></div>
         <div class="drop-item" onclick="bulkRunAll('both');closeActionsMenu()">▶▶ Run All <small style="margin-left:auto;opacity:.6">solve → validate</small></div>
+        <div class="drop-divider"></div>
+        <div class="drop-section">Results</div>
+        <div class="drop-item" style="color:var(--danger)" onclick="clearAllResults();closeActionsMenu()">🗑 Clear All Results</div>
       </div>
     </div>
     <button class="btn btn-primary" onclick="openModal()">＋ Add CI</button>
@@ -551,6 +554,7 @@ function buildCard(ci) {
         <div class="card-url">${x(ci.url)}</div>
       </div>
       <div class="card-header-btns">
+        <button class="btn-icon" title="Clear results" onclick="clearResults('${ci.id}')">🗑</button>
         <button class="btn-icon" title="Edit" onclick="openEditModal('${ci.id}')">✎</button>
         <button class="btn-icon btn-danger" title="Remove" onclick="removeCI('${ci.id}')">✕</button>
       </div>
@@ -990,6 +994,20 @@ async function bulkRunAll(mode = 'both') {
 }
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────
+// ── Clear results ──────────────────────────────────────────────────────────────
+function clearResults(ciId) {
+  delete runHistory[ciId];
+  saveHistory();
+  renderModuleSummary(ciId);
+}
+
+function clearAllResults() {
+  if (!confirm('Clear all test results for every CI?')) return;
+  Object.keys(runHistory).forEach(id => delete runHistory[id]);
+  saveHistory();
+  document.querySelectorAll('.ci-card').forEach(card => renderModuleSummary(card.dataset.ciId));
+}
+
 async function removeCI(ciId) {
   if (!confirm('Remove this CI instance?')) return;
   await api('DELETE', '/cis/' + ciId);
