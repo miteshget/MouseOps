@@ -1,0 +1,28 @@
+# Git
+.git
+.gitignore
+
+# Runtime data (never bake into image)
+cis.json
+users.json
+.secret.key
+seq_state.json
+logs/
+.ssl/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+frontend/node_modules/
+
+# Built output (rebuilt inside Docker)
+static/
+
+# Docs and tooling
+README.adoc
+*.md
+.claude/

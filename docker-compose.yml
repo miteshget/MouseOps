@@ -1,0 +1,45 @@
+services:
+  mouseops:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mouseops:latest
+    container_name: mouseops
+    restart: unless-stopped
+
+    ports:
+      - "8765:8765"   # HTTP  (redirects to HTTPS in https mode, or serves directly in http mode)
+      - "8766:8766"   # HTTPS
+
+    volumes:
+      - mouseops_data:/app/data   # persistent: cis.json, users.json, .secret.key, .ssl/, logs/
+
+    environment:
+      MOUSEOPS_MODE:        https   # "http" for plain HTTP, "https" for TLS (default)
+      MOUSEOPS_HTTP_PORT:   "8765"
+      MOUSEOPS_HTTPS_PORT:  "8766"
+      MOUSEOPS_DATA_DIR:    /app/data
+      # MOUSEOPS_READONLY:  "1"   # uncomment to lock all writes
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          python3 -c "
+          import urllib.request, ssl
+          ctx = ssl.create_default_context()
+          ctx.check_hostname = False
+          ctx.verify_mode = ssl.CERT_NONE
+          try:
+            urllib.request.urlopen('https://localhost:8766/api/health', context=ctx, timeout=5)
+          except Exception:
+            urllib.request.urlopen('http://localhost:8765/api/health', timeout=5)
+          "
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  mouseops_data:
+    driver: local

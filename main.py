@@ -32,16 +32,20 @@ import httpx
 _URL_RE    = re.compile(r'^https?://.{1,490}$', re.IGNORECASE)
 _MODULE_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]{0,99}$')
 
-DATA_FILE      = Path("cis.json")
-USERS_FILE     = Path("users.json")
-LOGS_DIR       = Path("logs")
-SEQ_STATE_FILE = Path("seq_state.json")
-KEY_FILE       = Path(".secret.key")
+# When running in Docker, set MOUSEOPS_DATA_DIR to the mounted volume path.
+# Defaults to "." for local development (backward compatible).
+_DATA_DIR = Path(os.getenv("MOUSEOPS_DATA_DIR", "."))
+
+DATA_FILE      = _DATA_DIR / "cis.json"
+USERS_FILE     = _DATA_DIR / "users.json"
+LOGS_DIR       = _DATA_DIR / "logs"
+SEQ_STATE_FILE = _DATA_DIR / "seq_state.json"
+KEY_FILE       = _DATA_DIR / ".secret.key"
 
 _file_lock = threading.Lock()   # protects all file writes throughout the module
 
 # ── TLS / ports ───────────────────────────────────────────────────────────────
-SSL_DIR   = Path(".ssl")
+SSL_DIR   = _DATA_DIR / ".ssl"
 SSL_CERT  = SSL_DIR / "cert.pem"
 SSL_KEY   = SSL_DIR / "key.pem"
 
