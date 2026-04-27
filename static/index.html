@@ -1,117 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MouseOps</title>
-<link rel="stylesheet" href="/style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MouseOps</title>
+  <link rel="icon" href="/logo.png" />
+  <script type="module" crossorigin src="/assets/index-D5BdsgKa.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DIsSmzhj.css">
 </head>
-<body>
-
-<!-- ── Header ─────────────────────────────────────────────── -->
-<header class="app-header">
-  <div class="brand">
-    <img src="/logo.png" alt="MouseOps" style="height:32px;width:32px;border-radius:50%;object-fit:cover;">
-    <h1>MouseOps</h1>
-    <span class="rh-badge">RHDP</span>
-  </div>
-  <div class="header-actions">
-    <div class="actions-dropdown">
-      <button class="btn btn-outline" onclick="toggleActionsMenu(event)">Actions ▾</button>
-      <div class="actions-menu" id="actions-menu">
-        <div class="drop-section">Individual</div>
-        <div class="drop-item" onclick="bulkAction('solve');closeActionsMenu()">🚀 Solve All <small style="margin-left:auto;opacity:.6">current module</small></div>
-        <div class="drop-item" onclick="bulkAction('validate');closeActionsMenu()">✓ Validate All <small style="margin-left:auto;opacity:.6">current module</small></div>
-        <div class="drop-divider"></div>
-        <div class="drop-section">Sequential</div>
-        <div class="drop-item" onclick="bulkRunAll('solve');closeActionsMenu()">▶ Solve All <small style="margin-left:auto;opacity:.6">full range</small></div>
-        <div class="drop-item" onclick="bulkRunAll('validate');closeActionsMenu()">▶ Validate All <small style="margin-left:auto;opacity:.6">full range</small></div>
-        <div class="drop-item" onclick="bulkRunAll('both');closeActionsMenu()">▶▶ Run All <small style="margin-left:auto;opacity:.6">solve → validate</small></div>
-        <div class="drop-divider"></div>
-        <div class="drop-section">Config</div>
-        <div class="drop-item" onclick="exportConfig();closeActionsMenu()">⬇ Export Config</div>
-        <div class="drop-item" onclick="document.getElementById('import-file').click();closeActionsMenu()">⬆ Import Config</div>
-        <input type="file" id="import-file" accept=".json" style="display:none"
-               onchange="importConfig(this.files[0]).finally(()=>this.value='')">
-        <div class="drop-divider"></div>
-        <div class="drop-section">Results</div>
-        <div class="drop-item" style="color:var(--danger)" onclick="clearAllResults();closeActionsMenu()">🗑 Clear All Results</div>
-      </div>
-    </div>
-    <button class="btn btn-primary" onclick="openModal()">＋ Add CI</button>
-  </div>
-</header>
-
-<!-- ── Offline banner ─────────────────────────────────────── -->
-<div id="offline-banner" class="offline-banner" style="display:none">
-  ⚠ Backend unreachable — API calls will fail. Retrying every 30 s…
-</div>
-
-<!-- ── Toast container ───────────────────────────────────── -->
-<div id="toast-container" class="toast-container"></div>
-
-<!-- ── Empty state ────────────────────────────────────────── -->
-<div id="empty-state" class="empty-state">
-  <div class="icon">🎭</div>
-  <h2>No CI instances yet</h2>
-  <p>Add a Showroom CI to manage solve &amp; validate actions in one place.</p>
-  <button class="btn btn-primary" onclick="openModal()">＋ Add CI</button>
-</div>
-
-<!-- ── CI Grid ────────────────────────────────────────────── -->
-<main id="ci-grid" class="ci-grid" style="display:none"></main>
-
-<!-- ── Add / Edit CI modal ───────────────────────────────── -->
-<div id="modal-overlay" class="modal-overlay" style="display:none" onclick="handleOverlayClick(event)">
-  <div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-header">
-      <h2 id="modal-title">Add CI Instance</h2>
-      <button class="btn-icon" onclick="closeModal()">✕</button>
-    </div>
-    <form id="ci-form" onsubmit="handleSubmit(event)">
-      <div class="form-group">
-        <label for="f-name">Name</label>
-        <input type="text" id="f-name" placeholder="e.g. HOL RHEL10 – p5s2g" required>
-      </div>
-      <div class="form-group">
-        <label for="f-url">Showroom URL</label>
-        <input type="url" id="f-url" placeholder="https://showroom.apps.cluster.example.com" required>
-      </div>
-      <div class="form-group">
-        <label for="f-token">Auth Token <span class="optional">(optional)</span></label>
-        <input type="password" id="f-token" placeholder="Leave blank to keep existing" autocomplete="off">
-      </div>
-      <div class="form-group">
-        <label for="f-modules">Modules</label>
-        <input type="text" id="f-modules" placeholder="module-01,module-02,module-03">
-        <div class="mod-helper">
-          Auto-fill from
-          <input type="number" id="f-mod-from" min="0" max="99" value="0" style="width:52px">
-          to
-          <input type="number" id="f-mod-to" min="0" max="99" value="5" style="width:52px">
-          <button type="button" class="btn btn-sm btn-ghost" onclick="autoFill()">Fill</button>
-        </div>
-        <small>Comma-separated. Leave blank to type module name manually per action.</small>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-ghost" onclick="closeModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary" id="submit-btn">Add CI</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- ── Log expand modal ───────────────────────────────────── -->
-<div id="log-modal" class="log-modal" style="display:none" onclick="handleLogModalClick(event)">
-  <div class="log-modal-box">
-    <div class="log-modal-header">
-      <span class="log-modal-title" id="log-modal-title">Log</span>
-      <button class="btn-icon" style="color:#8b949e" onclick="closeLogModal()">✕</button>
-    </div>
-    <pre id="log-modal-pre" class="log-modal-pre"></pre>
-  </div>
-</div>
-
-<script src="/app.js"></script>
+<body class="bg-gray-50">
+  <div id="root"></div>
 </body>
 </html>

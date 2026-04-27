@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Smooth tile enter/exit */
+@keyframes tileIn  { from { opacity:0; transform:scale(.96) translateY(6px); } to { opacity:1; transform:none; } }
+@keyframes tileOut { from { opacity:1; transform:none; } to { opacity:0; transform:scale(.96) translateY(6px); } }
+.tile-enter { animation: tileIn .22s ease forwards; }
+
+/* Dark terminal log */
+.log-pre {
+  @apply font-mono text-xs bg-gray-950 text-green-400 p-3 rounded overflow-auto max-h-52 whitespace-pre-wrap break-all;
+}
+
+/* Step chips */
+.step-ok      { @apply bg-emerald-50  text-emerald-800 border border-emerald-200; }
+.step-changed  { @apply bg-blue-50    text-blue-800    border border-blue-200; }
+.step-fail     { @apply bg-red-50     text-red-800     border border-red-200; }
+.step-pending  { @apply bg-amber-50   text-amber-800   border border-amber-200; }
+
+/* Scrollbar slim */
+::-webkit-scrollbar       { width:5px; height:5px; }
+::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:99px; }
