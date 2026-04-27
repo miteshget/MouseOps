@@ -9,6 +9,10 @@ logs/
 __pycache__/
 *.pyc
 
-# Node / React build
+# Node / React build artifacts
 frontend/node_modules/
 frontend/dist/
+
+# Compiled frontend output (reproduced by bash build.sh)
+static/assets/
+static/index.html
