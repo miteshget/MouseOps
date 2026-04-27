@@ -11,11 +11,15 @@ Stop clicking through individual Showroom tabs — run Solve and Validate across
 
 * https://git-scm.com[Git]
 * https://www.python.org/downloads/[Python 3.11 or newer]
+* https://nodejs.org[Node.js 18 or newer] (for building the React frontend)
 * Network access to your Showroom instances (VPN if required)
+
+Verify:
 
 [source,bash]
 ----
-python3 --version   # must show 3.11.x or higher
+python3 --version   # 3.11.x or higher
+node --version      # 18.x or higher
 ----
 
 == Installation
@@ -33,62 +37,88 @@ cd MouseOps
 bash run.sh
 ----
 
-First run creates a virtualenv and installs dependencies automatically.
-Every subsequent run starts immediately.
+`run.sh` does everything automatically on first run:
+
+. Builds the React frontend (`frontend/` → `static/`)
+. Creates a Python virtualenv
+. Installs all Python dependencies
+. Starts the FastAPI backend
 
 ----
 MouseOps → http://127.0.0.1:8765
 ----
 
-Open http://127.0.0.1:8765. Stop with `Ctrl+C`.
+Open http://127.0.0.1:8765 in your browser.
+Stop the server with `Ctrl+C`.
 
-== Adding a CI Instance
+=== Rebuilding the frontend after UI changes
 
-. Click *＋ Add CI* in the top-right corner.
-. Fill in the form:
-+
+[source,bash]
+----
+bash build.sh       # re-runs npm install + vite build
+bash run.sh         # restart server (set SKIP_BUILD=1 to skip build step)
+----
+
+[source,bash]
+----
+SKIP_BUILD=1 bash run.sh    # skip build, start server immediately
+----
+
+=== Frontend development mode (hot reload)
+
+Run the FastAPI backend and the Vite dev server side by side:
+
+[source,bash]
+----
+# Terminal 1 — backend
+SKIP_BUILD=1 bash run.sh
+
+# Terminal 2 — frontend dev server with hot reload
+cd frontend
+npm install        # first time only
+npm run dev        # http://127.0.0.1:5173 (proxies /api to :8765)
+----
+
+== UI Overview
+
+=== Left Sidebar
+
+The collapsible sidebar lists every CI instance.
+
 [cols="1,3"]
 |===
-| Field | What to enter
+| Control | Purpose
 
-| *Name*
-| A short label, e.g. `LB1237 - RHEL10 - h9lhq`
+| Toggle switch
+| Show or hide a tile on the main dashboard.
 
-| *Showroom URL*
-| The base URL, e.g. `https://showroom.apps.cluster.example.com`
+| *All* / *None* buttons
+| Show or hide every tile at once.
 
-| *Auth Token*
-| Bearer token if authentication is required. Leave blank if not needed.
-Leave blank when editing to keep the existing token.
+| Search box
+| Filter the list by name or URL in real time.
 
-| *Modules*
-| Comma-separated list, e.g. `module-01,module-02,module-03`.
-Use *Auto-fill* instead of typing (see below).
+| Drag handle (⠿)
+| Drag tiles to reorder them. Order is saved across refreshes.
+
+| *＋ Add CI* button
+| Open the Add CI form.
 |===
 
-. Click *Add CI*.
+Visibility and order are saved to browser `localStorage` and restored on every page load.
+New CIs default to visible. Removing a CI cleans up its entry.
 
-=== Auto-fill Modules
+=== Main Dashboard
 
-. Enter the start number in *from* (use `0` for `module-00`).
-. Enter the last number in *to*.
-. Click *Fill*.
+The dashboard shows only the tiles you have toggled on.
+Each CI is a card with two sections.
 
-.Example
-`from 0 to 7` → `module-00, module-01, … module-07`
-
-NOTE: Some labs start at `module-00`, others at `module-01`.
-
-== CI Card Layout
-
-Each card has two sections.
-
-=== Individual Execution
+==== Individual Execution
 
 Runs one action on one selected module.
 
-. Pick the module from the *Module* dropdown.
-. Click:
+. Pick the target module from the *Module* dropdown.
+. Click an action:
 
 [cols="1,3"]
 |===
@@ -104,12 +134,12 @@ Runs one action on one selected module.
 Live task chips appear as the playbook runs.
 Expand *Show logs* for full Ansible output, or click *⤢* to open it full-screen.
 
-=== Sequential Execution
+==== Sequential Execution
 
-Runs a range of modules in order on the server — persists across page refreshes.
+Runs a range of modules in order on the *server* — the loop survives page refreshes.
 
 . Set *Range* using the *from* and *to* dropdowns.
-. Click:
+. Click an action:
 
 [cols="1,3"]
 |===
@@ -123,12 +153,12 @@ Runs a range of modules in order on the server — persists across page refreshe
 
 | *▶▶ Both*
 | Runs solve then validate on each module before moving to the next.
-Only continues to the next module when the current one passes both steps.
+  Only moves forward when the current step passes.
 |===
 
-==== On Failure
+===== On Failure
 
-When a module fails the run pauses and shows three options:
+When a module fails the server pauses and the card shows three options:
 
 [cols="1,3"]
 |===
@@ -137,67 +167,24 @@ When a module fails the run pauses and shows three options:
 | *🔄 Rerun*
 | Re-runs the failed stage on the same module. Repeats until it passes or you stop.
 
-| *⏭ Skip & Continue*
+| *⏭ Skip*
 | Marks the module failed and moves to the next one.
 
 | *■ Stop*
 | Stops the sequential run immediately.
 |===
 
-==== Page Refresh During a Sequential Run
+===== Page Refresh During a Sequential Run
 
-The sequential loop runs on the server, not in the browser.
-Refreshing the page reconnects automatically — the run continues from exactly where it was.
+The server owns the loop — it keeps running regardless of what the browser does.
+On refresh, each tile reconnects automatically:
+
+* If a sequential run is active, the tile locks its controls and `useSeqWatch` reconnects to the server loop.
+* If an individual stream is active, the tile replays the buffered output and continues live.
+
 A toast notification confirms the reconnect.
 
-==== Cancel at Any Time
-
-Click *■ Stop* to cancel the current stream or sequential run.
-
-== Bulk Actions (All CIs)
-
-Click *Actions ▾* in the top-right corner to act on every CI at once.
-
-[cols="1,1,3"]
-|===
-| Section | Item | Behaviour
-
-| Individual
-| 🚀 Solve All
-| Fires solve on every card's currently selected module simultaneously.
-
-| Individual
-| ✓ Validate All
-| Fires validate on every card's currently selected module simultaneously.
-
-| Sequential
-| ▶ Solve All
-| Runs sequential solve on each CI, one CI at a time.
-
-| Sequential
-| ▶ Validate All
-| Runs sequential validate on each CI, one CI at a time.
-
-| Sequential
-| ▶▶ Run All
-| Runs sequential solve + validate on each CI, one CI at a time.
-
-| Config
-| ⬇ Export Config
-| Downloads all CI configurations as a JSON file (no IDs — safe to import on another machine).
-
-| Config
-| ⬆ Import Config
-| Opens a file picker to load a previously exported JSON config.
-
-| Results
-| 🗑 Clear All Results
-| Wipes the module summary table for every CI (with confirmation).
-|===
-
-NOTE: Sequential bulk actions process CIs one after another — the next CI does not start until the previous one finishes.
-
-== Module Summary Table
+=== Module Summary Table
 
 After any action a summary table appears on the card:
 
@@ -210,52 +197,113 @@ After any action a summary table appears on the card:
 | ✅ Pass 📄
 
 | module-02
-| ❌ Fail 📄
+| ⟳ running
 | —
 
 | module-03
-| 🔵 running…
+| ❌ Fail 📄
 | —
 |===
 
 * Appears automatically — no action needed.
-* Updates live as each module completes.
+* Shows a live spinner while a module is running.
+* Updates in real time as each module completes.
 * Persists across page refreshes via browser `localStorage`.
 * Re-running a module overwrites its row.
 * Click *📄* next to any badge to open that module's persisted log in the full-screen viewer.
-* Rows for modules that have been removed from the CI config are greyed out with ⚠.
+* Rows for modules removed from the CI config are greyed out with ⚠.
 
-== Card Header Buttons
+=== Card Header Buttons
 
 [cols="1,3"]
 |===
 | Button | Action
 
 | *📄*
-| Load the last run's log into the full-screen viewer.
+| Load the last recorded run's log into the full-screen viewer.
 
 | *🗑*
-| Clear this CI's module summary results (with confirmation). Other CIs are not affected.
+| Clear this CI's module summary (with confirmation). Other CIs are not affected.
 
 | *✎*
 | Edit the CI's name, URL, token, or module list.
 
 | *✕*
-| Remove the CI and clear its history (with confirmation).
+| Remove the CI and its history (with confirmation).
 |===
 
-== Log Viewer
+== Adding a CI Instance
 
-* Inline logs appear in a collapsible *Show logs* panel at the bottom of each card.
-* Click *⤢* in the log bar to open a full-screen dark terminal view.
-* If a run is active, new lines appear in real time in the full-screen view.
-* Click *📄* in the module summary table to load any module's persisted log directly.
+. Click *＋ Add CI* (header or sidebar).
+. Fill in the form:
+
+[cols="1,3"]
+|===
+| Field | What to enter
+
+| *Name*
+| A short label, e.g. `LB1237 - RHEL10 - h9lhq`
+
+| *Showroom URL*
+| The base URL, e.g. `https://showroom.apps.cluster.example.com`
+
+| *Auth Token*
+| Bearer token if authentication is required. Leave blank if not needed.
+  Leave blank when editing to keep the existing token.
+
+| *Modules*
+| Comma-separated list. Use *Auto-fill* instead of typing.
+|===
+
+=== Auto-fill Modules
+
+. Enter the start number in *from* (use `0` for `module-00`).
+. Enter the end number in *to*.
+. Click *Fill*.
+
+.Example
+`from 0 to 7` → `module-00, module-01, … module-07`
+
+NOTE: Some labs start at `module-00`, others at `module-01`.
+
+== Bulk Actions (All CIs)
+
+Click *Actions ▾* in the top-right corner to act on every CI at once.
+
+[cols="1,1,3"]
+|===
+| Section | Item | Behaviour
+
+| Sequential
+| ▶ Solve All
+| Starts sequential solve-only on each CI, one CI at a time.
+
+| Sequential
+| ▶ Validate All
+| Starts sequential validate-only on each CI, one CI at a time.
+
+| Sequential
+| ▶▶ Run All
+| Starts sequential solve + validate on each CI, one CI at a time.
+
+| Config
+| ⬇ Export Config
+| Downloads all CI configs as a JSON file (tokens included, IDs excluded).
+
+| Config
+| ⬆ Import Config
+| Loads a previously exported JSON file and adds the CIs.
+
+| Results
+| 🗑 Clear All Results
+| Wipes the module summary for every CI (with confirmation).
+|===
 
 == Editing and Removing CIs
 
-* *✎ Edit* — update the name, URL, token, or module list.
-* *✕ Remove* — deletes the CI and its history (with confirmation).
-* Editing does not interrupt a running stream.
+* *✎ Edit* — update name, URL, token, or module list.
+* *✕ Remove* — deletes the CI and clears its history (with confirmation).
+* Editing a CI does not interrupt an active stream.
 
 TIP: Leave *Auth Token* blank when editing to keep the existing token unchanged.
 
@@ -266,7 +314,7 @@ TIP: Leave *Auth Token* blank when editing to keep the existing token unchanged.
 | Data | Location
 
 | CI configurations (name, URL, token, modules)
-| `cis.json` in the project directory — created automatically.
+| `cis.json` in the project root — created automatically.
 
 | Active stream buffers and sequential run state
 | Server memory — lost if the server restarts.
@@ -274,19 +322,50 @@ TIP: Leave *Auth Token* blank when editing to keep the existing token unchanged.
 | Module run history (pass/fail per module)
 | Browser `localStorage` — survives page refresh until browser data is cleared.
 
-| Persisted logs (full Ansible output)
-| `logs/{ci_id}/{module}/{stage}.log` in the project directory.
+| Persisted log files (full Ansible output)
+| `logs/{ci_id}/{module}/{stage}.log` in the project root.
+
+| Tile visibility and order
+| Browser `localStorage` under key `mouseops-visibility`.
 |===
 
 IMPORTANT: `cis.json` and `logs/` are in `.gitignore` and are never committed.
 They may contain auth tokens and internal Showroom URLs.
+
+== Project Structure
+
+----
+MouseOps/
+├── main.py              ← FastAPI backend (SSE proxy, sequential orchestrator)
+├── requirements.txt     ← Python dependencies
+├── run.sh               ← One-command startup (build + serve)
+├── build.sh             ← Builds React frontend → static/
+├── frontend/            ← React source (Vite + Tailwind + dnd-kit)
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── context/AppContext.jsx   ← global state
+│   │   ├── hooks/
+│   │   │   ├── useStream.js         ← SSE streaming
+│   │   │   └── useSeqWatch.js       ← sequential run watcher
+│   │   ├── components/
+│   │   │   ├── Sidebar.jsx          ← collapsible tile list + DnD
+│   │   │   ├── Dashboard.jsx        ← responsive tile grid
+│   │   │   ├── CITile.jsx           ← full tile card
+│   │   │   └── ...
+│   │   └── utils/
+│   │       ├── api.js               ← fetch wrappers
+│   │       ├── parser.js            ← Ansible output → step chips
+│   │       └── storage.js           ← localStorage helpers
+│   └── package.json
+└── static/              ← Built frontend (served by FastAPI, not committed)
+----
 
 == Updating
 
 [source,bash]
 ----
 git pull
-bash run.sh
+bash run.sh        # rebuilds frontend and restarts server
 ----
 
 == Troubleshooting
@@ -299,13 +378,16 @@ bash run.sh
 | The URL or module name is wrong. Open the CI in *✎ Edit* and verify the Showroom URL and module names.
 
 | *❌ Cannot connect to Showroom*
-| Showroom is down or unreachable. Check VPN and try opening the URL directly in your browser.
+| Showroom is down or unreachable. Check VPN and try the URL directly in your browser.
 
 | *Sequential run lost after server restart*
-| The server-side run state is in memory. If the server restarts (e.g. uvicorn `--reload` auto-reload), active runs are lost. Re-run from the card.
+| The server-side run state is in memory. If the server restarts, active runs are lost. Re-run from the card.
 
 | *Port 8765 already in use*
-| Stop the other process or edit `run.sh` to change `--port 8765`.
+| Stop the other process or change `--port 8765` in `run.sh`.
+
+| *Frontend looks outdated after git pull*
+| Run `bash build.sh` to rebuild, then restart the server.
 
 | *Module summary missing after browser clear*
 | `localStorage` was wiped. Re-run the modules to rebuild the table.
@@ -313,6 +395,9 @@ bash run.sh
 | *`python3: command not found`*
 | Install Python 3.11+ and ensure it is on `$PATH`.
 
-| *Permission denied on run.sh*
-| `chmod +x run.sh`
+| *`node: command not found`*
+| Install Node.js 18+ from https://nodejs.org.
+
+| *Permission denied on run.sh / build.sh*
+| `chmod +x run.sh build.sh`
 |===
