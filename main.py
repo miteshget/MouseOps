@@ -1,26 +1,94 @@
 import asyncio
-import threading
+import hashlib
+import json
+import os
 import re
+import secrets
+import threading
+import time
+import uuid
 from collections import deque
-from fastapi import FastAPI, HTTPException, Path as FPath
+from pathlib import Path
+from typing import Literal, Optional
+
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Path as FPath, Response
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 import httpx
-import json
-import uuid
-from pathlib import Path
-from typing import Optional, Literal
 
+# ── Validation patterns ───────────────────────────────────────────────────────
 _URL_RE    = re.compile(r'^https?://.{1,490}$', re.IGNORECASE)
 _MODULE_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]{0,99}$')
 
-DATA_FILE = Path("cis.json")
-LOGS_DIR  = Path("logs")
+DATA_FILE  = Path("cis.json")
+USERS_FILE = Path("users.json")
+LOGS_DIR   = Path("logs")
+
 _file_lock = threading.Lock()
 
+# Hard lockdown: set MOUSEOPS_READONLY=1 to block writes even for admins
+READONLY: bool = os.getenv("MOUSEOPS_READONLY", "").lower() in ("1", "true", "yes")
+
+# In-memory session store  {token → {username, role, expires}}
+_sessions: dict = {}
+
+# ── Active run registries ─────────────────────────────────────────────────────
 _run_active: dict = {}   # (ci_id, stage, module) → stream state
 _seq_active: dict = {}   # ci_id → sequential run state
+
+
+# ── User helpers ──────────────────────────────────────────────────────────────
+def _hash_pw(password: str, salt: str | None = None):
+    if salt is None:
+        salt = secrets.token_hex(16)
+    h = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+    return h, salt
+
+
+def _verify_pw(password: str, hashed: str, salt: str) -> bool:
+    return hashlib.sha256(f"{salt}{password}".encode()).hexdigest() == hashed
+
+
+def load_users() -> list:
+    if USERS_FILE.exists():
+        return json.loads(USERS_FILE.read_text())
+    # Bootstrap default admin
+    h, s = _hash_pw("mouseops")
+    default = [{"username": "admin", "password_hash": h, "salt": s, "role": "admin"}]
+    save_users(default)
+    return default
+
+
+def save_users(users: list) -> None:
+    with _file_lock:
+        USERS_FILE.write_text(json.dumps(users, indent=2))
+
+
+# ── Auth dependencies ─────────────────────────────────────────────────────────
+def get_current_user(mouseops_session: Optional[str] = Cookie(None)) -> dict:
+    if not mouseops_session:
+        raise HTTPException(401, "Not authenticated — please log in")
+    session = _sessions.get(mouseops_session)
+    if not session or session["expires"] < time.time():
+        _sessions.pop(mouseops_session, None)
+        raise HTTPException(401, "Session expired — please log in again")
+    session["expires"] = time.time() + 8 * 3600   # rolling window
+    return session
+
+
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin access required")
+    return user
+
+
+def require_write(user: dict = Depends(get_current_user)) -> dict:
+    if READONLY:
+        raise HTTPException(403, "Server is in read-only mode (MOUSEOPS_READONLY=1)")
+    if user["role"] != "admin":
+        raise HTTPException(403, "Admin access required for write operations")
+    return user
 
 
 def load_cis() -> list:
@@ -37,6 +105,50 @@ def save_cis(cis: list) -> None:
 app = FastAPI(title="MouseOps")
 
 
+# ── Pydantic models ───────────────────────────────────────────────────────────
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _pw(cls, v):
+        if len(v) < 4:
+            raise ValueError("Password must be at least 4 characters")
+        return v
+
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role: Literal["admin", "viewer"] = "viewer"
+
+    @field_validator("username")
+    @classmethod
+    def _uname(cls, v):
+        v = v.strip()
+        if not re.match(r'^[a-zA-Z0-9_\-]{2,32}$', v):
+            raise ValueError("Username must be 2–32 alphanumeric characters")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def _pw(cls, v):
+        if len(v) < 4:
+            raise ValueError("Password must be at least 4 characters")
+        return v
+
+
+class UpdateUserRequest(BaseModel):
+    role: Optional[Literal["admin", "viewer"]] = None
+    new_password: Optional[str] = None
+
+
 class CIConfig(BaseModel):
     name: str
     url: str
@@ -45,7 +157,7 @@ class CIConfig(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def _name(cls, v: str) -> str:
+    def _name(cls, v):
         v = v.strip()
         if not v: raise ValueError("Name cannot be empty")
         if len(v) > 200: raise ValueError("Name must be 200 characters or fewer")
@@ -53,20 +165,20 @@ class CIConfig(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def _url(cls, v: str) -> str:
+    def _url(cls, v):
         v = v.strip().rstrip("/")
         if not _URL_RE.match(v): raise ValueError("URL must start with http:// or https://")
         return v
 
     @field_validator("token")
     @classmethod
-    def _token(cls, v: Optional[str]) -> str:
+    def _token(cls, v):
         if v and len(v) > 2000: raise ValueError("Token must be 2000 characters or fewer")
         return v or ""
 
     @field_validator("modules")
     @classmethod
-    def _modules(cls, v: list) -> list:
+    def _modules(cls, v):
         if len(v) > 500: raise ValueError("Cannot specify more than 500 modules")
         for mod in v:
             if not _MODULE_RE.match(mod): raise ValueError(f'Invalid module name "{mod}"')
@@ -82,15 +194,117 @@ class DecisionRequest(BaseModel):
     decision: Literal["skip", "rerun", "stop"]
 
 
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+@app.post("/api/auth/login")
+def login(req: LoginRequest, response: Response):
+    users = load_users()
+    user  = next((u for u in users if u["username"] == req.username), None)
+    if not user or not _verify_pw(req.password, user["password_hash"], user["salt"]):
+        raise HTTPException(401, "Invalid username or password")
+    token = secrets.token_urlsafe(32)
+    _sessions[token] = {
+        "username": user["username"],
+        "role":     user["role"],
+        "expires":  time.time() + 8 * 3600,
+    }
+    response.set_cookie(
+        key="mouseops_session", value=token,
+        httponly=True, samesite="strict", max_age=8 * 3600,
+    )
+    return {"username": user["username"], "role": user["role"], "readonly": READONLY}
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response, user: dict = Depends(get_current_user),
+           mouseops_session: Optional[str] = Cookie(None)):
+    _sessions.pop(mouseops_session, None)
+    response.delete_cookie("mouseops_session")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def me(user: dict = Depends(get_current_user)):
+    return {"username": user["username"], "role": user["role"], "readonly": READONLY}
+
+
+@app.post("/api/auth/change-password")
+def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    users = load_users()
+    idx   = next((i for i, u in enumerate(users) if u["username"] == user["username"]), None)
+    if idx is None:
+        raise HTTPException(404, "User not found")
+    u = users[idx]
+    if not _verify_pw(req.current_password, u["password_hash"], u["salt"]):
+        raise HTTPException(401, "Current password is incorrect")
+    h, s = _hash_pw(req.new_password)
+    users[idx]["password_hash"] = h
+    users[idx]["salt"] = s
+    save_users(users)
+    return {"ok": True}
+
+
+# ── User management (admin only) ──────────────────────────────────────────────
+@app.get("/api/users")
+def list_users(_: dict = Depends(require_admin)):
+    return [{"username": u["username"], "role": u["role"]} for u in load_users()]
+
+
+@app.post("/api/users", status_code=201)
+def create_user(req: CreateUserRequest, _: dict = Depends(require_admin)):
+    users = load_users()
+    if any(u["username"] == req.username for u in users):
+        raise HTTPException(409, f'User "{req.username}" already exists')
+    h, s = _hash_pw(req.password)
+    users.append({"username": req.username, "password_hash": h, "salt": s, "role": req.role})
+    save_users(users)
+    return {"username": req.username, "role": req.role}
+
+
+@app.put("/api/users/{username}")
+def update_user(username: str, req: UpdateUserRequest, admin: dict = Depends(require_admin)):
+    users = load_users()
+    idx = next((i for i, u in enumerate(users) if u["username"] == username), None)
+    if idx is None:
+        raise HTTPException(404, "User not found")
+    if req.role:
+        # Prevent removing the last admin
+        if req.role != "admin" and users[idx]["role"] == "admin":
+            if sum(1 for u in users if u["role"] == "admin") <= 1:
+                raise HTTPException(400, "Cannot demote the last admin account")
+        users[idx]["role"] = req.role
+    if req.new_password:
+        if len(req.new_password) < 4:
+            raise HTTPException(422, "Password must be at least 4 characters")
+        h, s = _hash_pw(req.new_password)
+        users[idx]["password_hash"] = h
+        users[idx]["salt"] = s
+    save_users(users)
+    return {"username": username, "role": users[idx]["role"]}
+
+
+@app.delete("/api/users/{username}")
+def delete_user(username: str, admin: dict = Depends(require_admin)):
+    users = load_users()
+    u = next((u for u in users if u["username"] == username), None)
+    if not u:
+        raise HTTPException(404, "User not found")
+    if u["role"] == "admin" and sum(1 for x in users if x["role"] == "admin") <= 1:
+        raise HTTPException(400, "Cannot delete the last admin account")
+    if username == admin["username"]:
+        raise HTTPException(400, "Cannot delete your own account")
+    save_users([x for x in users if x["username"] != username])
+    return {"ok": True}
+
+
 # ── Health ────────────────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "cis": len(load_cis())}
+    return {"status": "ok", "cis": len(load_cis()), "readonly": READONLY}
 
 
-# ── Active individual streams ─────────────────────────────────────────────────
+# ── Active runs ───────────────────────────────────────────────────────────────
 @app.get("/api/active-runs")
-def active_runs():
+def active_runs(_: dict = Depends(get_current_user)):
     return [
         {"ci_id": k[0], "stage": k[1], "module": k[2]}
         for k, v in _run_active.items()
@@ -100,19 +314,14 @@ def active_runs():
 
 # ── Sequential run control ────────────────────────────────────────────────────
 @app.get("/api/seq-runs")
-def seq_runs():
+def seq_runs(_: dict = Depends(get_current_user)):
     return [
         {
-            "ci_id":        ci_id,
-            "mode":         v["mode"],
-            "mods":         v["mods"],
-            "currentIdx":   v["currentIdx"],
-            "currentMod":   v["currentMod"],
-            "currentStage": v["currentStage"],
-            "total":        len(v["mods"]),
-            "paused":       v.get("paused", False),
-            "pausedMod":    v.get("pausedMod"),
-            "pausedStage":  v.get("pausedStage"),
+            "ci_id": ci_id, "mode": v["mode"], "mods": v["mods"],
+            "currentIdx": v["currentIdx"], "currentMod": v["currentMod"],
+            "currentStage": v["currentStage"], "total": len(v["mods"]),
+            "paused": v.get("paused", False),
+            "pausedMod": v.get("pausedMod"), "pausedStage": v.get("pausedStage"),
         }
         for ci_id, v in _seq_active.items()
         if not v.get("done")
@@ -123,6 +332,7 @@ def seq_runs():
 async def start_seq(
     ci_id: str = FPath(..., pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
     req: SeqRequest = ...,
+    _: dict = Depends(require_write),
 ):
     if ci_id in _seq_active and not _seq_active[ci_id].get("done"):
         raise HTTPException(400, "Sequential run already active for this CI")
@@ -145,12 +355,12 @@ async def start_seq(
 @app.post("/api/seq/{ci_id}/stop")
 def stop_seq(
     ci_id: str = FPath(..., pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    _: dict = Depends(require_write),
 ):
     seq = _seq_active.get(ci_id)
     if not seq or seq.get("done"):
         raise HTTPException(404, "No active sequential run")
     seq["stopped"] = True
-    # Unblock if paused
     event = seq.get("_decision_event")
     if event:
         seq["decision"] = "stop"
@@ -162,6 +372,7 @@ def stop_seq(
 def seq_decision(
     ci_id: str = FPath(..., pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
     req: DecisionRequest = ...,
+    _: dict = Depends(require_write),
 ):
     seq = _seq_active.get(ci_id)
     if not seq or not seq.get("paused"):
@@ -177,12 +388,12 @@ def seq_decision(
 
 # ── CI CRUD ───────────────────────────────────────────────────────────────────
 @app.get("/api/cis")
-def get_cis():
+def get_cis(_: dict = Depends(get_current_user)):
     return load_cis()
 
 
 @app.post("/api/cis", status_code=201)
-def create_ci(ci: CIConfig):
+def create_ci(ci: CIConfig, _: dict = Depends(require_write)):
     cis = load_cis()
     entry = {**ci.model_dump(), "id": str(uuid.uuid4())}
     cis.append(entry)
@@ -191,7 +402,7 @@ def create_ci(ci: CIConfig):
 
 
 @app.put("/api/cis/{ci_id}")
-def update_ci(ci_id: str, ci: CIConfig):
+def update_ci(ci_id: str, ci: CIConfig, _: dict = Depends(require_write)):
     cis = load_cis()
     for i, c in enumerate(cis):
         if c["id"] == ci_id:
@@ -205,7 +416,7 @@ def update_ci(ci_id: str, ci: CIConfig):
 
 
 @app.delete("/api/cis/{ci_id}")
-def delete_ci(ci_id: str):
+def delete_ci(ci_id: str, _: dict = Depends(require_write)):
     cis = load_cis()
     new_cis = [c for c in cis if c["id"] != ci_id]
     if len(new_cis) == len(cis):
@@ -220,6 +431,7 @@ def get_log(
     ci_id:       str = FPath(..., pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
     stage:       str = FPath(..., pattern=r'^(solve|validate)$'),
     module_name: str = FPath(..., pattern=r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]{0,99}$'),
+    _: dict = Depends(get_current_user),
 ):
     log_file = LOGS_DIR / ci_id / module_name / f"{stage}.log"
     if not log_file.exists():
@@ -286,24 +498,18 @@ async def _bg_stream(run_key: tuple, url: str, req_headers: dict,
         asyncio.create_task(_cleanup())
 
 
-async def _run_stage_and_wait(ci_id: str, stage: str, mod: str,
-                               ci: dict, seq_state: dict) -> str:
-    """Run one module stage. Returns 'ok', 'fail', or 'stopped'."""
+async def _run_stage_and_wait(ci_id, stage, mod, ci, seq_state):
     run_key = (ci_id, stage, mod)
     url = f"{ci['url'].rstrip('/')}/stream/{stage}/{mod}"
     req_headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
     if ci.get("token"):
         req_headers["Authorization"] = f"Bearer {ci['token']}"
-
     run_state: dict = {"subscribers": [], "buffer": deque(maxlen=1000), "done": False}
     _run_active[run_key] = run_state
-
     log_dir = LOGS_DIR / ci_id / mod
     log_dir.mkdir(parents=True, exist_ok=True)
     log_fh = open(log_dir / f"{stage}.log", "w", encoding="utf-8")
-
     task = asyncio.create_task(_bg_stream(run_key, url, req_headers, run_state, log_fh))
-
     while not run_state.get("done"):
         if seq_state.get("stopped"):
             task.cancel()
@@ -313,13 +519,10 @@ async def _run_stage_and_wait(ci_id: str, stage: str, mod: str,
                 pass
             return "stopped"
         await asyncio.sleep(0.2)
-
     try:
         await task
     except Exception:
         pass
-
-    # Detect failure: connection errors OR Ansible fatal/failed lines
     buf = list(run_state["buffer"])
     if any(b"__DONE_FAIL__" in e for e in buf[-3:]):
         return "fail"
@@ -328,114 +531,86 @@ async def _run_stage_and_wait(ci_id: str, stage: str, mod: str,
     return "ok"
 
 
-async def _ask_decision(seq_state: dict, mod: str, stage: str) -> str:
-    """Pause the sequential run and block until the client sends a decision."""
+async def _ask_decision(seq_state, mod, stage):
     event = asyncio.Event()
-    seq_state.update({
-        "paused": True,
-        "pausedMod": mod,
-        "pausedStage": stage,
-        "_decision_event": event,
-        "decision": None,
-    })
+    seq_state.update({"paused": True, "pausedMod": mod, "pausedStage": stage,
+                       "_decision_event": event, "decision": None})
     await event.wait()
     seq_state["paused"] = False
     seq_state["_decision_event"] = None
     return seq_state.get("decision", "stop")
 
 
-async def _run_module(ci_id: str, mod: str, mode: str,
-                       ci: dict, seq_state: dict) -> str:
-    """Run all stages for one module with retry/skip support. Returns 'ok', 'skip', or 'stop'."""
-    # Solve
+async def _run_module(ci_id, mod, mode, ci, seq_state):
     if mode != "validate":
         while True:
             if seq_state.get("stopped"):
                 return "stop"
             seq_state["currentStage"] = "solve"
             result = await _run_stage_and_wait(ci_id, "solve", mod, ci, seq_state)
-            if result == "stopped":
-                return "stop"
-            if result == "ok":
-                break
-            # Failed — ask client
+            if result == "stopped": return "stop"
+            if result == "ok": break
             decision = await _ask_decision(seq_state, mod, "solve")
-            if decision == "stop":
-                return "stop"
-            if decision == "skip":
-                return "skip"
-            # "rerun" → loop back and retry
-
-    # Validate (only if solve passed or mode is validate-only)
+            if decision == "stop": return "stop"
+            if decision == "skip": return "skip"
     if mode != "solve":
         while True:
             if seq_state.get("stopped"):
                 return "stop"
             seq_state["currentStage"] = "validate"
             result = await _run_stage_and_wait(ci_id, "validate", mod, ci, seq_state)
-            if result == "stopped":
-                return "stop"
-            if result == "ok":
-                break
+            if result == "stopped": return "stop"
+            if result == "ok": break
             decision = await _ask_decision(seq_state, mod, "validate")
-            if decision == "stop":
-                return "stop"
-            if decision == "skip":
-                return "skip"   # skip validate, continue to next module
-            # "rerun" → retry validate
-
+            if decision == "stop": return "stop"
+            if decision == "skip": return "skip"
     return "ok"
 
 
-async def _bg_seq(ci_id: str, ci: dict, state: dict) -> None:
-    """Server-side sequential orchestrator. Survives browser refresh."""
+async def _bg_seq(ci_id, ci, state):
     for i, mod in enumerate(state["mods"]):
         if state.get("stopped"):
             break
-        state["currentIdx"]   = i
-        state["currentMod"]   = mod
+        state["currentIdx"] = i
+        state["currentMod"] = mod
         state["currentStage"] = None
-
         result = await _run_module(ci_id, mod, state["mode"], ci, state)
         if result == "stop" or state.get("stopped"):
             break
-        # "ok" or "skip" → continue to next module
-
     state["done"] = True
-
     async def _cleanup():
         await asyncio.sleep(10)
         _seq_active.pop(ci_id, None)
     asyncio.create_task(_cleanup())
 
 
-# ── SSE endpoint — subscribe only ─────────────────────────────────────────────
+# ── SSE stream endpoint ───────────────────────────────────────────────────────
 @app.get("/api/stream/{ci_id}/{stage}/{module_name}")
 async def proxy_stream(
     ci_id:       str = FPath(..., pattern=r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
     stage:       str = FPath(..., pattern=r'^(solve|validate)$'),
     module_name: str = FPath(..., pattern=r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]{0,99}$'),
+    user: dict = Depends(get_current_user),
 ):
     run_key = (ci_id, stage, module_name)
 
+    # Viewers may join EXISTING streams but not start new ones
     if run_key not in _run_active or _run_active[run_key].get("done"):
+        if READONLY or user["role"] != "admin":
+            raise HTTPException(403, "Viewers cannot start new streams")
         cis = load_cis()
-        ci = next((c for c in cis if c["id"] == ci_id), None)
+        ci  = next((c for c in cis if c["id"] == ci_id), None)
         if not ci:
-            raise HTTPException(status_code=404, detail="CI not found")
-
+            raise HTTPException(404, "CI not found")
         url = f"{ci['url'].rstrip('/')}/stream/{stage}/{module_name}"
         req_headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
         if ci.get("token"):
             req_headers["Authorization"] = f"Bearer {ci['token']}"
-
         state: dict = {"subscribers": [], "buffer": deque(maxlen=1000), "done": False}
         _run_active[run_key] = state
-
         log_dir = LOGS_DIR / ci_id / module_name
         log_dir.mkdir(parents=True, exist_ok=True)
         log_fh = open(log_dir / f"{stage}.log", "w", encoding="utf-8")
-
         asyncio.create_task(_bg_stream(run_key, url, req_headers, state, log_fh))
 
     state = _run_active[run_key]

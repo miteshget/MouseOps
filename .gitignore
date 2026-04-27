@@ -1,5 +1,6 @@
-# Runtime data — contains live URLs and auth tokens
+# Runtime data — contains live URLs, auth tokens, and user credentials
 cis.json
+users.json
 
 # Persisted run logs — contain CI-specific output, not for version control
 logs/

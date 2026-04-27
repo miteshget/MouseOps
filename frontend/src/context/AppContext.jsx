@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { getCIs, createCI, updateCI, deleteCI } from '../utils/api';
+import { getCIs, createCI, updateCI, deleteCI, getMe, logout as apiLogout } from '../utils/api';
+import { onUnauthorized } from '../utils/api';
 import { loadHistory, saveHistory, saveLastRun, getLastRun } from '../utils/storage';
 import { loadVisibility, saveVisibility, mergeVisibility } from '../utils/storage';
 
@@ -7,10 +8,48 @@ const AppCtx = createContext(null);
 export const useApp = () => useContext(AppCtx);
 
 export function AppProvider({ children }) {
-  const [cis,       setCIs]       = useState([]);
-  const [history,   setHistory]   = useState(loadHistory);
-  const [visibility, setVisibility] = useState(null);  // merged after CIs load
-  const [toasts,    setToasts]    = useState([]);
+  const [cis,        setCIs]        = useState([]);
+  const [history,    setHistory]    = useState(loadHistory);
+  const [visibility, setVisibility] = useState(null);
+  const [toasts,     setToasts]     = useState([]);
+  const [readonly,   setReadonly]   = useState(false);
+
+  // ── Auth state ─────────────────────────────────────────────────────────────
+  const [user,          setUser]          = useState(null);   // null = loading
+  const [loginRequired, setLoginRequired] = useState(false);
+
+  // Wire the 401 handler so any apiFetch 401 → show login
+  useEffect(() => {
+    onUnauthorized.handler = () => {
+      setUser(null);
+      setLoginRequired(true);
+    };
+    return () => { onUnauthorized.handler = null; };
+  }, []);
+
+  // Check session on mount
+  useEffect(() => {
+    getMe()
+      .then(u => {
+        setUser(u);
+        setReadonly(u.readonly ?? false);
+        setLoginRequired(false);
+      })
+      .catch(() => setLoginRequired(true));
+  }, []);
+
+  const onLoginSuccess = useCallback((u) => {
+    setUser(u);
+    setReadonly(u.readonly ?? false);
+    setLoginRequired(false);
+  }, []);
+
+  const doLogout = useCallback(async () => {
+    await apiLogout().catch(() => {});
+    setUser(null);
+    setLoginRequired(true);
+    setCIs([]);
+  }, []);
 
   // ── CI CRUD ────────────────────────────────────────────────────────────────
   const refreshCIs = useCallback(async () => {
@@ -23,7 +62,9 @@ export function AppProvider({ children }) {
     });
   }, []);
 
-  useEffect(() => { refreshCIs(); }, [refreshCIs]);
+  useEffect(() => {
+    if (user) refreshCIs();
+  }, [user, refreshCIs]);
 
   const addCI    = useCallback(async d => { await createCI(d); await refreshCIs(); }, [refreshCIs]);
   const editCI   = useCallback(async (id, d) => { await updateCI(id, d); await refreshCIs(); }, [refreshCIs]);
@@ -97,6 +138,8 @@ export function AppProvider({ children }) {
       visibility, setModuleVisible, setAllVisible, reorderTiles,
       history, setModuleState, clearHistory, getLastRun,
       toasts, toast,
+      readonly,
+      user, loginRequired, onLoginSuccess, doLogout,
     }}>
       {children}
     </AppCtx.Provider>

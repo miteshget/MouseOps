@@ -42,7 +42,7 @@ export function useStream(ciId) {
       setIsRunning(true);
       setStatus({ text: `Running ${stage} on ${mod}…`, type: 'running' });
 
-      const es = new EventSource(`/api/stream/${ciId}/${stage}/${encodeURIComponent(mod)}`);
+      const es = new EventSource(`/api/stream/${ciId}/${stage}/${encodeURIComponent(mod)}`, { withCredentials: true });
       esRef.current = es;
 
       es.onmessage = (evt) => {
