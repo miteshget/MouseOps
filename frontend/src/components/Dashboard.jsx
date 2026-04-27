@@ -16,8 +16,8 @@ export default function Dashboard({ onEdit, onOpenLog }) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-3">
         <img src="/logo.png" alt="" className="w-16 h-16 rounded-full opacity-30" />
-        <p className="text-lg font-semibold">No CI instances yet</p>
-        <p className="text-sm">Click <strong>＋ Add CI</strong> to get started.</p>
+        <p className="text-lg font-semibold">No Showroom instances yet</p>
+        <p className="text-sm">Click <strong>＋ Add Showroom</strong> to get started.</p>
       </div>
     );
   }

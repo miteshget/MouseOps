@@ -51,7 +51,7 @@ export default function AddEditModal({ ci, onClose }) {
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-gray-800">{editing ? 'Edit CI Instance' : 'Add CI Instance'}</h2>
+          <h2 className="font-semibold text-gray-800">{editing ? 'Edit Showroom' : 'Add Showroom'}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
         </div>
 
@@ -101,7 +101,7 @@ export default function AddEditModal({ ci, onClose }) {
             </button>
             <button type="submit" disabled={saving}
               className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium transition-colors disabled:opacity-50">
-              {saving ? 'Saving…' : editing ? 'Save Changes' : 'Add CI'}
+              {saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Showroom'}
             </button>
           </div>
         </form>

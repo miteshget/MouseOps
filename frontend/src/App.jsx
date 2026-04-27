@@ -24,13 +24,20 @@ function Shell() {
   const [logModal,    setLogModal]    = useState(null);
   const [usersOpen,   setUsersOpen]   = useState(false);
 
-  // Show login screen until authenticated
-  if (loginRequired || !user) {
-    return <LoginModal onSuccess={onLoginSuccess} />;
+  // First-ever load — nothing to show yet
+  if (!user && !loginRequired) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-900">
+        <svg className="animate-spin w-8 h-8 text-gray-500" viewBox="0 0 24 24" fill="none">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/>
+        </svg>
+      </div>
+    );
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gray-100">
+    <div className="flex h-screen overflow-hidden bg-gray-100 relative">
       <Sidebar open={sidebarOpen} onOpenAdd={() => setAddModal({})} />
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
@@ -69,7 +76,7 @@ function Shell() {
             {!readonly && user?.role === 'admin' && (
               <button onClick={() => setAddModal({})}
                 className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded transition-colors">
-                ＋ Add CI
+                ＋ Add Showroom
               </button>
             )}
 
@@ -91,6 +98,13 @@ function Shell() {
 
         <Dashboard onEdit={ci => setAddModal(ci)} onOpenLog={opts => setLogModal(opts)} />
       </div>
+
+      {/* Login overlay — tiles stay mounted so streams keep running */}
+      {loginRequired && (
+        <div className="absolute inset-0 z-50">
+          <LoginModal onSuccess={onLoginSuccess} />
+        </div>
+      )}
 
       {/* Modals */}
       {addModal !== null && user?.role === 'admin' && !readonly && (

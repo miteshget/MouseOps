@@ -56,7 +56,7 @@ export default function Sidebar({ open, onOpenAdd }) {
       {/* Header */}
       <div className="px-4 pt-4 pb-3 border-b border-gray-700">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-xs font-bold uppercase tracking-widest text-gray-400">CI Instances</span>
+          <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Showroom Instances</span>
           <span className="text-xs text-gray-500">{visibleCount}/{cis.length}</span>
         </div>
 
@@ -109,7 +109,7 @@ export default function Sidebar({ open, onOpenAdd }) {
 
         {filtered.length === 0 && (
           <p className="text-xs text-gray-600 text-center mt-6 px-4">
-            {search ? 'No CIs match your search.' : 'No CI instances added yet.'}
+            {search ? 'No Showrooms match your search.' : 'No Showroom instances added yet.'}
           </p>
         )}
       </div>
@@ -121,7 +121,7 @@ export default function Sidebar({ open, onOpenAdd }) {
             onClick={onOpenAdd}
             className="w-full flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 rounded transition-colors"
           >
-            <span>＋</span> Add CI
+            <span>＋</span> Add Showroom
           </button>
         </div>
       )}

@@ -28,7 +28,7 @@ export default function LoginModal({ onSuccess }) {
         <div className="flex flex-col items-center mb-8 gap-3">
           <img src="/logo.png" alt="MouseOps" className="w-16 h-16 rounded-full shadow-lg" />
           <h1 className="text-2xl font-bold text-white">MouseOps</h1>
-          <span className="text-gray-400 text-sm">RHDP Showroom Manager</span>
+          <span className="text-gray-400 text-sm">Showroom E2E Test Runner</span>
         </div>
 
         <form onSubmit={handleSubmit}

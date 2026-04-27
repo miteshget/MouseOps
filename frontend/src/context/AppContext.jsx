@@ -48,7 +48,8 @@ export function AppProvider({ children }) {
     await apiLogout().catch(() => {});
     setUser(null);
     setLoginRequired(true);
-    setCIs([]);
+    // Intentionally NOT clearing CIs or stream state —
+    // backend processes keep running; tiles stay mounted and connected.
   }, []);
 
   // ── CI CRUD ────────────────────────────────────────────────────────────────
