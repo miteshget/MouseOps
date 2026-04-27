@@ -369,7 +369,16 @@ function parseSolveLine(line, stepList, state) {
     return { currentTask: name, pendingLi: li };
   }
   const { pendingLi } = state;
-  if (!pendingLi) return state;
+  if (!pendingLi) {
+    // Task was skipped (e.g. "Validate all tasks") but a fatal still occurred — still count it
+    if (/^(fatal|failed):/i.test(clean)) {
+      const li = document.createElement('li');
+      li.className   = 'sp-step sp-step-fail';
+      li.textContent = clean.split('=>')[0].trim();
+      stepList.appendChild(li);
+    }
+    return state;
+  }
   if      (/^ok:\s*\[/i.test(clean))           pendingLi.className = 'sp-step sp-step-ok';
   else if (/^changed:\s*\[/i.test(clean))       pendingLi.className = 'sp-step sp-step-changed';
   else if (/^(fatal|failed):/i.test(clean))     pendingLi.className = 'sp-step sp-step-fail';
@@ -386,8 +395,10 @@ function parseValidationMsg(line, stepList) {
     const t = part.trim();
     if (!t) return;
     const li = document.createElement('li');
-    li.className   = /^✅/.test(t) ? 'sp-step sp-step-ok'
-                   : /^❌/.test(t) ? 'sp-step sp-step-fail'
+    const isOk   = /^✅/.test(t) || /^\[PASS\]/i.test(t);
+    const isFail = /^❌/.test(t) || /^\[FAIL\]/i.test(t);
+    li.className   = isOk   ? 'sp-step sp-step-ok'
+                   : isFail ? 'sp-step sp-step-fail'
                    : 'sp-step sp-step-pending';
     li.textContent = t;
     stepList.appendChild(li);
@@ -671,7 +682,8 @@ function setModuleState(ciId, mod, stage, state) {
   if (!runHistory[ciId])      runHistory[ciId] = {};
   if (!runHistory[ciId][mod]) runHistory[ciId][mod] = { solve: null, validate: null };
   runHistory[ciId][mod][stage] = state;
-  saveHistory();
+  // Only persist terminal states — 'running' is transient and must not overwrite a previous result
+  if (state !== 'running') saveHistory();
   if (state === 'ok' || state === 'fail') saveLastRun(ciId, mod, stage);
   renderModuleSummary(ciId);
 }

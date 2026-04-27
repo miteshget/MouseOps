@@ -5,28 +5,20 @@ Mitesh, The Mouse <mitsharm@redhat.com>
 :icons: font
 
 A local web dashboard for managing multiple RHDP Showroom CI instances.
-Stop clicking through individual Showroom tabs — run Solve and Validate across all your CIs from one place.
+Stop clicking through individual Showroom tabs — run Solve and Validate across all your CIs from one place, with full persistence across page refreshes.
 
 == Prerequisites
-
-Before you begin, make sure you have:
 
 * https://git-scm.com[Git]
 * https://www.python.org/downloads/[Python 3.11 or newer]
 * Network access to your Showroom instances (VPN if required)
 
-Verify Python is ready:
-
 [source,bash]
 ----
-python3 --version
+python3 --version   # must show 3.11.x or higher
 ----
 
-You should see `Python 3.11.x` or higher.
-
 == Installation
-
-Clone the repository and enter the project directory:
 
 [source,bash]
 ----
@@ -41,24 +33,16 @@ cd MouseOps
 bash run.sh
 ----
 
-The first run automatically creates a Python virtualenv and installs all dependencies.
-Every subsequent run skips setup and starts the server immediately.
-
-You should see:
+First run creates a virtualenv and installs dependencies automatically.
+Every subsequent run starts immediately.
 
 ----
 MouseOps → http://127.0.0.1:8765
 ----
 
-Open http://127.0.0.1:8765 in your browser.
-To stop the server press `Ctrl+C`.
+Open http://127.0.0.1:8765. Stop with `Ctrl+C`.
 
-== First Steps
-
-When you open MouseOps for the first time the dashboard is empty.
-Start by adding the CI instances you want to manage.
-
-=== Add a CI Instance
+== Adding a CI Instance
 
 . Click *＋ Add CI* in the top-right corner.
 . Fill in the form:
@@ -68,47 +52,43 @@ Start by adding the CI instances you want to manage.
 | Field | What to enter
 
 | *Name*
-| A short label so you can tell CIs apart, e.g. `LB1237 - RHEL10 - h9lhq`
+| A short label, e.g. `LB1237 - RHEL10 - h9lhq`
 
 | *Showroom URL*
-| The base URL of the Showroom, e.g. `https://showroom.apps.cluster.example.com`
+| The base URL, e.g. `https://showroom.apps.cluster.example.com`
 
 | *Auth Token*
 | Bearer token if authentication is required. Leave blank if not needed.
+Leave blank when editing to keep the existing token.
 
 | *Modules*
-| The modules that exist on this Showroom. Type them comma-separated or use *Auto-fill* (see below).
+| Comma-separated list, e.g. `module-01,module-02,module-03`.
+Use *Auto-fill* instead of typing (see below).
 |===
 
-. Click *Add CI*. The card appears on the dashboard immediately.
-
-Repeat for every CI you want to manage.
+. Click *Add CI*.
 
 === Auto-fill Modules
 
-If your lab has a numbered sequence of modules, use the *Auto-fill* helper instead of typing each one:
-
-. In the *from* field enter the first module number (use `0` if your lab starts at `module-00`).
-. In the *to* field enter the last module number.
+. Enter the start number in *from* (use `0` for `module-00`).
+. Enter the last number in *to*.
 . Click *Fill*.
 
-The modules field fills automatically with zero-padded names.
-
 .Example
-`from 0 to 7` → `module-00, module-01, module-02, ... module-07`
+`from 0 to 7` → `module-00, module-01, … module-07`
 
-NOTE: Some labs start at `module-00`, others at `module-01`. Check your Showroom page before filling.
+NOTE: Some labs start at `module-00`, others at `module-01`.
 
 == CI Card Layout
 
-Each CI card is divided into two sections.
+Each card has two sections.
 
 === Individual Execution
 
-Runs a single action on one selected module.
+Runs one action on one selected module.
 
-. Pick the target module from the *Module* dropdown.
-. Click the action:
+. Pick the module from the *Module* dropdown.
+. Click:
 
 [cols="1,3"]
 |===
@@ -121,15 +101,15 @@ Runs a single action on one selected module.
 | Runs the validate playbook on the selected module.
 |===
 
-Live task progress appears as coloured chips.
-Click *Show logs* to see full Ansible output, or click *⤢* to open the log in a full-screen view.
+Live task chips appear as the playbook runs.
+Expand *Show logs* for full Ansible output, or click *⤢* to open it full-screen.
 
 === Sequential Execution
 
-Runs actions across a range of modules in order, one module at a time.
+Runs a range of modules in order on the server — persists across page refreshes.
 
-. Set the *Range* using the *from* and *to* dropdowns (or number inputs if no modules are configured).
-. Click the action:
+. Set *Range* using the *from* and *to* dropdowns.
+. Click:
 
 [cols="1,3"]
 |===
@@ -143,32 +123,40 @@ Runs actions across a range of modules in order, one module at a time.
 
 | *▶▶ Both*
 | Runs solve then validate on each module before moving to the next.
-Only continues to the next module when both steps pass.
+Only continues to the next module when the current one passes both steps.
 |===
 
-==== What Happens When a Module Fails
+==== On Failure
 
-MouseOps pauses and shows two options:
+When a module fails the run pauses and shows three options:
 
 [cols="1,3"]
 |===
 | Button | Behaviour
 
+| *🔄 Rerun*
+| Re-runs the failed stage on the same module. Repeats until it passes or you stop.
+
 | *⏭ Skip & Continue*
-| Skips the failed module and continues with the next one.
-The failed module stays marked ❌ in the summary table.
+| Marks the module failed and moves to the next one.
 
 | *■ Stop*
-| Stops the run immediately.
+| Stops the sequential run immediately.
 |===
+
+==== Page Refresh During a Sequential Run
+
+The sequential loop runs on the server, not in the browser.
+Refreshing the page reconnects automatically — the run continues from exactly where it was.
+A toast notification confirms the reconnect.
 
 ==== Cancel at Any Time
 
-Click *■ Stop* to cancel the currently running stream or sequential run.
+Click *■ Stop* to cancel the current stream or sequential run.
 
 == Bulk Actions (All CIs)
 
-Click *Actions ▾* in the top-right corner to run an action across every CI card at once.
+Click *Actions ▾* in the top-right corner to act on every CI at once.
 
 [cols="1,1,3"]
 |===
@@ -184,82 +172,122 @@ Click *Actions ▾* in the top-right corner to run an action across every CI car
 
 | Sequential
 | ▶ Solve All
-| Runs sequential solve-only on each CI, one CI at a time.
+| Runs sequential solve on each CI, one CI at a time.
 
 | Sequential
 | ▶ Validate All
-| Runs sequential validate-only on each CI, one CI at a time.
+| Runs sequential validate on each CI, one CI at a time.
 
 | Sequential
 | ▶▶ Run All
 | Runs sequential solve + validate on each CI, one CI at a time.
+
+| Config
+| ⬇ Export Config
+| Downloads all CI configurations as a JSON file (no IDs — safe to import on another machine).
+
+| Config
+| ⬆ Import Config
+| Opens a file picker to load a previously exported JSON config.
+
+| Results
+| 🗑 Clear All Results
+| Wipes the module summary table for every CI (with confirmation).
 |===
 
-NOTE: Sequential bulk actions process CIs one after another — the next CI does not start until the previous one completes or stops.
+NOTE: Sequential bulk actions process CIs one after another — the next CI does not start until the previous one finishes.
 
 == Module Summary Table
 
-After any action, a summary table appears on the card:
+After any action a summary table appears on the card:
 
 [cols="1,1,1"]
 |===
 | Module | Solve | Validate
 
 | module-01
-| ✅ Pass
-| ✅ Pass
+| ✅ Pass 📄
+| ✅ Pass 📄
 
 | module-02
-| ❌ Fail
+| ❌ Fail 📄
 | —
 
 | module-03
-| —
+| 🔵 running…
 | —
 |===
 
-* Appears automatically after the first run — no action needed.
-* Updates in real-time as each module completes.
-* Persists across page refreshes — history is not lost when you reload.
-* Re-running a module overwrites its row with the latest result.
+* Appears automatically — no action needed.
+* Updates live as each module completes.
+* Persists across page refreshes via browser `localStorage`.
+* Re-running a module overwrites its row.
+* Click *📄* next to any badge to open that module's persisted log in the full-screen viewer.
+* Rows for modules that have been removed from the CI config are greyed out with ⚠.
+
+== Card Header Buttons
+
+[cols="1,3"]
+|===
+| Button | Action
+
+| *📄*
+| Load the last run's log into the full-screen viewer.
+
+| *🗑*
+| Clear this CI's module summary results (with confirmation). Other CIs are not affected.
+
+| *✎*
+| Edit the CI's name, URL, token, or module list.
+
+| *✕*
+| Remove the CI and clear its history (with confirmation).
+|===
+
+== Log Viewer
+
+* Inline logs appear in a collapsible *Show logs* panel at the bottom of each card.
+* Click *⤢* in the log bar to open a full-screen dark terminal view.
+* If a run is active, new lines appear in real time in the full-screen view.
+* Click *📄* in the module summary table to load any module's persisted log directly.
 
 == Editing and Removing CIs
 
-* Click *✎* on a card to edit the name, URL, token, or module list.
-* Click *✕* to remove the CI and clear its history.
+* *✎ Edit* — update the name, URL, token, or module list.
+* *✕ Remove* — deletes the CI and its history (with confirmation).
+* Editing does not interrupt a running stream.
 
-TIP: When editing, leave the *Auth Token* field blank to keep the existing token unchanged.
-Only fill it in when you want to set a new one.
-
-NOTE: Editing or adding a CI while another is running does not interrupt the running stream.
+TIP: Leave *Auth Token* blank when editing to keep the existing token unchanged.
 
 == Where Data Is Stored
 
 [cols="1,3"]
 |===
-| Data | Where
+| Data | Location
 
 | CI configurations (name, URL, token, modules)
-| `cis.json` in the project directory — created automatically on first use.
+| `cis.json` in the project directory — created automatically.
+
+| Active stream buffers and sequential run state
+| Server memory — lost if the server restarts.
 
 | Module run history (pass/fail per module)
-| Browser `localStorage` — persists until you clear browser data.
+| Browser `localStorage` — survives page refresh until browser data is cleared.
+
+| Persisted logs (full Ansible output)
+| `logs/{ci_id}/{module}/{stage}.log` in the project directory.
 |===
 
-IMPORTANT: `cis.json` is in `.gitignore` and will never be committed.
-It is local to your machine and may contain auth tokens and internal Showroom URLs.
+IMPORTANT: `cis.json` and `logs/` are in `.gitignore` and are never committed.
+They may contain auth tokens and internal Showroom URLs.
 
 == Updating
-
-Pull the latest changes and restart:
 
 [source,bash]
 ----
 git pull
 bash run.sh
 ----
-
-No manual dependency updates are needed — `run.sh` keeps the virtualenv in sync.
 
 == Troubleshooting
 
@@ -268,23 +296,23 @@ No manual dependency updates are needed — `run.sh` keeps the virtualenv in syn
 | Problem | Fix
 
 | *❌ Showroom unreachable — HTTP 404*
-| The URL or module name is wrong. Open the CI in *✎ Edit* and double-check the Showroom URL.
-Also verify the module name exists on that Showroom.
+| The URL or module name is wrong. Open the CI in *✎ Edit* and verify the Showroom URL and module names.
 
 | *❌ Cannot connect to Showroom*
-| The Showroom is down or not reachable from your network.
-Check your VPN connection and try opening the Showroom URL in your browser directly.
+| Showroom is down or unreachable. Check VPN and try opening the URL directly in your browser.
+
+| *Sequential run lost after server restart*
+| The server-side run state is in memory. If the server restarts (e.g. uvicorn `--reload` auto-reload), active runs are lost. Re-run from the card.
 
 | *Port 8765 already in use*
-| Another process is using the port.
-Stop it or edit `run.sh` to change `--port 8765` to a free port.
+| Stop the other process or edit `run.sh` to change `--port 8765`.
 
 | *Module summary missing after browser clear*
-| `localStorage` was wiped. Re-run the affected modules to rebuild the summary table.
+| `localStorage` was wiped. Re-run the modules to rebuild the table.
 
 | *`python3: command not found`*
-| Install Python 3.11+ from https://www.python.org/downloads/ and ensure it is on your `PATH`.
+| Install Python 3.11+ and ensure it is on `$PATH`.
 
 | *Permission denied on run.sh*
-| Make it executable: `chmod +x run.sh`
+| `chmod +x run.sh`
 |===
