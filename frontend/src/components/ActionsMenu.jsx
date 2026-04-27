@@ -19,7 +19,12 @@ export default function ActionsMenu() {
       const mods = ci.modules || [];
       if (!mods.length) continue;
       try { await startSeq(ci.id, { mode, mods }); }
-      catch { toast(`Failed to start seq run for ${ci.name}`); }
+      catch (e) {
+        const msg = (e?.message || '').toLowerCase().includes('already active')
+          ? `Sequential run already active for ${ci.name}`
+          : `Failed to start seq run for ${ci.name}: ${e?.message || 'unknown error'}`;
+        toast(msg);
+      }
     }
     toast(`Sequential ${mode} started for all CIs`, 'info');
   };

@@ -119,8 +119,16 @@ export function AppProvider({ children }) {
   const clearHistory = useCallback((ciId) => {
     setHistory(prev => {
       const next = { ...prev };
-      if (ciId) delete next[ciId];
-      else Object.keys(next).forEach(k => delete next[k]);
+      if (ciId) {
+        delete next[ciId];
+        // Also prune the last-run entry for this CI
+        const lr = JSON.parse(localStorage.getItem('mouseops-last-run') || '{}');
+        delete lr[ciId];
+        localStorage.setItem('mouseops-last-run', JSON.stringify(lr));
+      } else {
+        Object.keys(next).forEach(k => delete next[k]);
+        localStorage.removeItem('mouseops-last-run');
+      }
       saveHistory(next);
       return next;
     });

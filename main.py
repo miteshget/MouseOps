@@ -21,6 +21,7 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from contextlib import asynccontextmanager
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Path as FPath, Response
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -64,8 +65,8 @@ def _ensure_ssl_cert() -> None:
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.datetime.utcnow())
-        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=3650))
+        .not_valid_before(datetime.datetime.now(datetime.timezone.utc))
+        .not_valid_after(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650))
         .add_extension(
             x509.SubjectAlternativeName([
                 x509.DNSName("localhost"),
@@ -235,10 +236,15 @@ def load_seq_state() -> dict:
         return {}
 
 
-app = FastAPI(title="MouseOps")
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    await _on_startup()
+    yield
 
 
-@app.on_event("startup")
+app = FastAPI(title="MouseOps", lifespan=_lifespan)
+
+
 async def _resume_seq_runs() -> None:
     """On server start, resume any sequential runs that were interrupted."""
     saved = load_seq_state()
@@ -268,7 +274,11 @@ async def _resume_seq_runs() -> None:
         asyncio.create_task(_bg_seq(ci_id, ci, state))
 
 
-@app.on_event("startup")
+async def _on_startup() -> None:
+    await _resume_seq_runs()
+    await _start_http_redirect()
+
+
 async def _start_http_redirect() -> None:
     """In HTTPS mode: start a lightweight HTTP server that redirects to HTTPS."""
     if not HTTPS_MODE:
