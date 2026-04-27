@@ -8,3 +8,7 @@ logs/
 .venv/
 __pycache__/
 *.pyc
+
+# Node / React build
+frontend/node_modules/
+frontend/dist/
