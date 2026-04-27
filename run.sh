@@ -10,7 +10,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 # ── Parse mode flag ───────────────────────────────────────────────────────────
-MODE="${MOUSEOPS_PROTOCOL:-https}"   # default: https
+MODE="${MOUSEOPS_PROTOCOL:-https}"
 for arg in "$@"; do
     case "$arg" in
         --http)  MODE=http  ;;
@@ -46,10 +46,65 @@ if [ "$MODE" = "http" ]; then
         --host 0.0.0.0 \
         --port "${HTTP_PORT}"
 else
-    # Export mode BEFORE importing main so HTTPS_MODE is set correctly in main.py
     export MOUSEOPS_MODE=https
-    # Ensure SSL cert exists before uvicorn binds the SSL port
-    .venv/bin/python3 -c "import main" 2>/dev/null || true
+
+    # ── Generate self-signed TLS cert if missing ──────────────────────────────
+    if [ ! -f ".ssl/cert.pem" ] || [ ! -f ".ssl/key.pem" ]; then
+        echo "Generating self-signed TLS certificate..."
+        .venv/bin/python3 - <<'PYEOF'
+import datetime, ipaddress, stat
+from pathlib import Path
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+ssl_dir = Path(".ssl")
+ssl_dir.mkdir(exist_ok=True)
+
+key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+subject = issuer = x509.Name([
+    x509.NameAttribute(NameOID.ORGANIZATION_NAME, "MouseOps"),
+    x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+])
+cert = (
+    x509.CertificateBuilder()
+    .subject_name(subject)
+    .issuer_name(issuer)
+    .public_key(key.public_key())
+    .serial_number(x509.random_serial_number())
+    .not_valid_before(datetime.datetime.utcnow())
+    .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=3650))
+    .add_extension(
+        x509.SubjectAlternativeName([
+            x509.DNSName("localhost"),
+            x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+        ]),
+        critical=False,
+    )
+    .sign(key, hashes.SHA256())
+)
+key_path  = ssl_dir / "key.pem"
+cert_path = ssl_dir / "cert.pem"
+key_path.write_bytes(key.private_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.TraditionalOpenSSL,
+    encryption_algorithm=serialization.NoEncryption(),
+))
+key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+print(f"Certificate written to {cert_path}")
+PYEOF
+
+        # Verify cert was actually created
+        if [ ! -f ".ssl/cert.pem" ] || [ ! -f ".ssl/key.pem" ]; then
+            echo ""
+            echo "ERROR: TLS certificate generation failed."
+            echo "Try HTTP mode instead: bash run.sh --http"
+            exit 1
+        fi
+    fi
+
     echo ""
     echo "MouseOps  [HTTPS mode]"
     echo "  HTTP  → http://127.0.0.1:${HTTP_PORT}  (redirects to HTTPS)"
