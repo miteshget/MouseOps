@@ -37,6 +37,8 @@ LOGS_DIR       = Path("logs")
 SEQ_STATE_FILE = Path("seq_state.json")
 KEY_FILE       = Path(".secret.key")
 
+_file_lock = threading.Lock()   # protects all file writes throughout the module
+
 # ── TLS / ports ───────────────────────────────────────────────────────────────
 SSL_DIR   = Path(".ssl")
 SSL_CERT  = SSL_DIR / "cert.pem"
@@ -117,8 +119,6 @@ def decrypt_token(value: str) -> str:
         return _fernet.decrypt(value.encode()).decode()
     except (InvalidToken, Exception):
         return value   # old plaintext — will be encrypted on next save
-
-_file_lock = threading.Lock()
 
 # Hard lockdown: set MOUSEOPS_READONLY=1 to block writes even for admins
 READONLY: bool = os.getenv("MOUSEOPS_READONLY", "").lower() in ("1", "true", "yes")
