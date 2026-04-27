@@ -9,8 +9,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useApp } from '../context/AppContext';
 
+
 export default function Sidebar({ open, onOpenAdd }) {
-  const { cis, visibility, setModuleVisible, setAllVisible, reorderTiles } = useApp();
+  const { cis, visibility, setModuleVisible, setAllVisible, reorderTiles, readonly, user } = useApp();
+  const canWrite = !readonly && user?.role === 'admin';
   const [search, setSearch] = useState('');
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -112,15 +114,17 @@ export default function Sidebar({ open, onOpenAdd }) {
         )}
       </div>
 
-      {/* Footer */}
-      <div className="px-3 py-3 border-t border-gray-700">
-        <button
-          onClick={onOpenAdd}
-          className="w-full flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 rounded transition-colors"
-        >
-          <span>＋</span> Add CI
-        </button>
-      </div>
+      {/* Footer — only shown to admins */}
+      {canWrite && (
+        <div className="px-3 py-3 border-t border-gray-700">
+          <button
+            onClick={onOpenAdd}
+            className="w-full flex items-center justify-center gap-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold py-2 rounded transition-colors"
+          >
+            <span>＋</span> Add CI
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

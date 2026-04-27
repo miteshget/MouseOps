@@ -16,7 +16,9 @@ const statusColor = {
 };
 
 export default function CITile({ ci, onEdit, onOpenLog }) {
-  const { history, setModuleState, clearHistory, removeCI, toast } = useApp();
+  const { history, setModuleState, clearHistory, removeCI, toast, readonly, user } = useApp();
+  // Viewers and hard-readonly mode see everything but can't act
+  const isReadonly = readonly || user?.role !== 'admin';
   const stream = useStream(ci.id);
 
   const [seqActive,    setSeqActive]      = useState(false);
@@ -165,12 +167,16 @@ export default function CITile({ ci, onEdit, onOpenLog }) {
           </span>
         </div>
         <div className="flex gap-1 ml-2 flex-shrink-0">
-          <IconBtn title="Load last log"   onClick={handleLoadLog}             icon="📄" />
-          <IconBtn title="Clear results"   onClick={() => clearHistory(ci.id)} icon="🗑" />
-          <IconBtn title="Edit"            onClick={onEdit}                    icon="✎" />
-          <IconBtn title="Remove" danger
-            onClick={() => { if (confirm(`Remove "${ci.name}"?`)) removeCI(ci.id); }}
-            icon="✕" />
+          <IconBtn title="Load last log" onClick={handleLoadLog} icon="📄" />
+          {!isReadonly && (
+            <>
+              <IconBtn title="Clear results" onClick={() => clearHistory(ci.id)} icon="🗑" />
+              <IconBtn title="Edit"          onClick={onEdit}                    icon="✎" />
+              <IconBtn title="Remove" danger
+                onClick={() => { if (confirm(`Remove "${ci.name}"?`)) removeCI(ci.id); }}
+                icon="✕" />
+            </>
+          )}
         </div>
       </div>
 
@@ -193,10 +199,12 @@ export default function CITile({ ci, onEdit, onOpenLog }) {
                 className="flex-1 text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-emerald-400" />
             )}
           </div>
-          <div className="flex gap-2">
-            <ActionBtn color="green" onClick={() => runSingle('solve')}    disabled={stream.isRunning || seqActive}>🚀 Solve</ActionBtn>
-            <ActionBtn color="blue"  onClick={() => runSingle('validate')} disabled={stream.isRunning || seqActive}>✓ Validate</ActionBtn>
-          </div>
+          {!isReadonly && (
+            <div className="flex gap-2">
+              <ActionBtn color="green" onClick={() => runSingle('solve')}    disabled={stream.isRunning || seqActive}>🚀 Solve</ActionBtn>
+              <ActionBtn color="blue"  onClick={() => runSingle('validate')} disabled={stream.isRunning || seqActive}>✓ Validate</ActionBtn>
+            </div>
+          )}
         </div>
 
         {/* SEQUENTIAL EXECUTION */}
@@ -227,14 +235,16 @@ export default function CITile({ ci, onEdit, onOpenLog }) {
               </>
             )}
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <ActionBtn color="green"  onClick={() => startSequential('solve')}    disabled={stream.isRunning || seqActive} small>▶ Solve</ActionBtn>
-            <ActionBtn color="blue"   onClick={() => startSequential('validate')} disabled={stream.isRunning || seqActive} small>▶ Validate</ActionBtn>
-            <ActionBtn color="purple" onClick={() => startSequential('both')}     disabled={stream.isRunning || seqActive} small>▶▶ Both</ActionBtn>
-            {(stream.isRunning || seqActive) && (
-              <ActionBtn color="gray" onClick={stopSequential} small>■ Stop</ActionBtn>
-            )}
-          </div>
+          {!isReadonly && (
+            <div className="flex gap-2 flex-wrap">
+              <ActionBtn color="green"  onClick={() => startSequential('solve')}    disabled={stream.isRunning || seqActive} small>▶ Solve</ActionBtn>
+              <ActionBtn color="blue"   onClick={() => startSequential('validate')} disabled={stream.isRunning || seqActive} small>▶ Validate</ActionBtn>
+              <ActionBtn color="purple" onClick={() => startSequential('both')}     disabled={stream.isRunning || seqActive} small>▶▶ Both</ActionBtn>
+              {(stream.isRunning || seqActive) && (
+                <ActionBtn color="gray" onClick={stopSequential} small>■ Stop</ActionBtn>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Module summary */}
@@ -250,8 +260,8 @@ export default function CITile({ ci, onEdit, onOpenLog }) {
           </div>
         )}
 
-        {/* Skip / Rerun / Stop banner */}
-        {paused && (
+        {/* Skip / Rerun / Stop banner — only admins can issue decisions */}
+        {paused && !isReadonly && (
           <div className="flex items-center gap-2 flex-wrap bg-amber-50 border border-amber-300 rounded-md p-2.5 text-xs">
             <span className="font-semibold text-amber-800 flex-1 min-w-0">
               {paused.stage} failed on {paused.mod} — what next?
