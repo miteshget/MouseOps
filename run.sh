@@ -28,8 +28,9 @@ fi
 if [ ! -d ".venv" ]; then
     echo "Creating Python virtualenv..."
     python3 -m venv .venv
-    .venv/bin/pip install -q -r requirements.txt
 fi
+# Always sync so newly added packages (e.g. cryptography) are installed
+.venv/bin/pip install -q -r requirements.txt
 
 # ── Ports ─────────────────────────────────────────────────────────────────────
 HTTP_PORT="${MOUSEOPS_HTTP_PORT:-8765}"
