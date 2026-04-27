@@ -1,6 +1,11 @@
 # Runtime data — contains live URLs, auth tokens, and user credentials
 cis.json
 users.json
+.secret.key
+seq_state.json
+
+# TLS certificates (auto-generated on first run)
+.ssl/
 
 # Persisted run logs — contain CI-specific output, not for version control
 logs/

@@ -4,8 +4,8 @@ Mitesh, The Mouse <mitsharm@redhat.com>
 :toc-title: Contents
 :icons: font
 
-A local web dashboard for managing multiple RHDP Showroom CI instances.
-Stop clicking through individual Showroom tabs — run Solve and Validate across all your CIs from one place, with full persistence across page refreshes.
+A local web dashboard for managing multiple RHDP Showroom instances.
+Run Solve and Validate across all your Showrooms from one place, with full persistence across page refreshes and server restarts.
 
 == Prerequisites
 
@@ -13,8 +13,6 @@ Stop clicking through individual Showroom tabs — run Solve and Validate across
 * https://www.python.org/downloads/[Python 3.11 or newer]
 * https://nodejs.org[Node.js 18 or newer] (for building the React frontend)
 * Network access to your Showroom instances (VPN if required)
-
-Verify:
 
 [source,bash]
 ----
@@ -32,58 +30,138 @@ cd MouseOps
 
 == Starting the App
 
+`run.sh` handles everything automatically: builds the React frontend, creates a Python virtualenv, installs dependencies, generates a TLS certificate, and starts the server.
+
+=== HTTPS mode (default — recommended)
+
 [source,bash]
 ----
 bash run.sh
+# or explicitly:
+bash run.sh --https
 ----
 
-`run.sh` does everything automatically on first run:
-
-. Builds the React frontend (`frontend/` → `static/`)
-. Creates a Python virtualenv
-. Installs all Python dependencies
-. Starts the FastAPI backend
-
 ----
-MouseOps → http://127.0.0.1:8765
+MouseOps  [HTTPS mode]
+  HTTP  → http://127.0.0.1:8765  (redirects to HTTPS)
+  HTTPS → https://127.0.0.1:8766
+  Note: browser will warn about self-signed cert — click Advanced → Proceed
 ----
 
-Open http://127.0.0.1:8765 in your browser.
-Stop the server with `Ctrl+C`.
+A self-signed TLS certificate is generated automatically in `.ssl/` on first run.
+It is valid for 10 years and covers `localhost` / `127.0.0.1`.
 
-=== Rebuilding the frontend after UI changes
+=== HTTP mode (no SSL)
 
 [source,bash]
 ----
-bash build.sh       # re-runs npm install + vite build
-bash run.sh         # restart server (set SKIP_BUILD=1 to skip build step)
+bash run.sh --http
 ----
+
+----
+MouseOps  [HTTP mode]
+  http://127.0.0.1:8765
+----
+
+=== Custom ports
 
 [source,bash]
 ----
-SKIP_BUILD=1 bash run.sh    # skip build, start server immediately
+MOUSEOPS_HTTP_PORT=80 MOUSEOPS_HTTPS_PORT=443 bash run.sh --https
+MOUSEOPS_HTTP_PORT=8080 bash run.sh --http
+----
+
+=== Other options
+
+[source,bash]
+----
+SKIP_BUILD=1 bash run.sh        # skip React build step
+bash build.sh                   # rebuild frontend only
 ----
 
 === Frontend development mode (hot reload)
 
-Run the FastAPI backend and the Vite dev server side by side:
+[source,bash]
+----
+# Terminal 1 — backend (HTTP mode is simpler for dev)
+SKIP_BUILD=1 bash run.sh --http
+
+# Terminal 2 — Vite dev server
+cd frontend
+npm install   # first time only
+MOUSEOPS_DEV_TARGET=http://127.0.0.1:8765 npm run dev
+# opens http://127.0.0.1:5173 and proxies /api to the backend
+----
+
+Stop the server with `Ctrl+C`.
+
+== Authentication
+
+Every user must sign in before accessing the dashboard.
+
+=== Default credentials
+
+----
+Username: admin
+Password: mouseops
+----
+
+Change the admin password immediately after first login.
+
+=== User roles
+
+[cols="1,1,3"]
+|===
+| Role | Who | What they can do
+
+| *admin*
+| Lab engineers
+| Full access: run Solve/Validate, manage CIs, manage users, clear results, export/import config.
+
+| *viewer*
+| Stakeholders, observers
+| Read-only: view tiles, watch live streams, load logs. Cannot trigger any actions.
+|===
+
+=== Managing users (admin only)
+
+. Click your username in the top-right header.
+. Select the *Users* tab.
+
+From there you can:
+
+* *Create* a new user with `admin` or `viewer` role.
+* *Toggle role* by clicking the role badge next to a username.
+* *Remove* a user (cannot remove yourself or the last admin).
+
+=== Changing your password
+
+. Click your username in the top-right header.
+. Select the *Change Password* tab.
+
+All users can change their own password at any time.
+
+=== Sign out
+
+Click *Sign out* in the top-right header.
+Signing out shows the login overlay — all running streams and sequential runs continue uninterrupted in the background.
+
+=== Emergency read-only lockdown
+
+Set `MOUSEOPS_READONLY=1` to block all write operations server-side, even for admin accounts:
 
 [source,bash]
 ----
-# Terminal 1 — backend
-SKIP_BUILD=1 bash run.sh
-
-# Terminal 2 — frontend dev server with hot reload
-cd frontend
-npm install        # first time only
-npm run dev        # http://127.0.0.1:5173 (proxies /api to :8765)
+MOUSEOPS_READONLY=1 bash run.sh
 ----
+
+A *Read-only* badge appears in the header.
 
 == UI Overview
 
 === Left Sidebar
 
-The collapsible sidebar lists every CI instance.
+The collapsible sidebar lists every Showroom instance.
 
 [cols="1,3"]
 |===
@@ -101,17 +179,14 @@ The collapsible sidebar lists every CI instance.
 | Drag handle (⠿)
 | Drag tiles to reorder them. Order is saved across refreshes.
 
-| *＋ Add CI* button
-| Open the Add CI form.
+| *＋ Add Showroom* button
+| Open the Add Showroom form (admin only).
 |===
-
-Visibility and order are saved to browser `localStorage` and restored on every page load.
-New CIs default to visible. Removing a CI cleans up its entry.
 
 === Main Dashboard
 
 The dashboard shows only the tiles you have toggled on.
-Each CI is a card with two sections.
+Each Showroom is a card with two sections.
 
 ==== Individual Execution
 
@@ -136,7 +211,7 @@ Expand *Show logs* for full Ansible output, or click *⤢* to open it full-scree
 
 ==== Sequential Execution
 
-Runs a range of modules in order on the *server* — the loop survives page refreshes.
+Runs a range of modules in order — the loop runs on the *server* and survives both page refreshes and server restarts.
 
 . Set *Range* using the *from* and *to* dropdowns.
 . Click an action:
@@ -174,15 +249,12 @@ When a module fails the server pauses and the card shows three options:
 | Stops the sequential run immediately.
 |===
 
-===== Page Refresh During a Sequential Run
+===== Surviving Page Refresh and Server Restart
 
-The server owns the loop — it keeps running regardless of what the browser does.
-On refresh, each tile reconnects automatically:
+The sequential loop runs on the server as a background task:
 
-* If a sequential run is active, the tile locks its controls and `useSeqWatch` reconnects to the server loop.
-* If an individual stream is active, the tile replays the buffered output and continues live.
-
-A toast notification confirms the reconnect.
+* *Page refresh* — the browser reconnects automatically. A toast confirms the reconnect.
+* *Server restart* — progress is saved to `seq_state.json` before each module. On restart, the loop resumes from where it stopped.
 
 === Module Summary Table
 
@@ -210,7 +282,7 @@ After any action a summary table appears on the card:
 * Updates in real time as each module completes.
 * Persists across page refreshes via browser `localStorage`.
 * Re-running a module overwrites its row.
-* Click *📄* next to any badge to open that module's persisted log in the full-screen viewer.
+* Click *📄* next to any badge to open that module's persisted log.
 * Rows for modules removed from the CI config are greyed out with ⚠.
 
 === Card Header Buttons
@@ -223,18 +295,18 @@ After any action a summary table appears on the card:
 | Load the last recorded run's log into the full-screen viewer.
 
 | *🗑*
-| Clear this CI's module summary (with confirmation). Other CIs are not affected.
+| Clear this Showroom's module summary (with confirmation). Other tiles are not affected.
 
 | *✎*
-| Edit the CI's name, URL, token, or module list.
+| Edit the Showroom's name, URL, token, or module list (admin only).
 
 | *✕*
-| Remove the CI and its history (with confirmation).
+| Remove the Showroom and its history (with confirmation) (admin only).
 |===
 
-== Adding a CI Instance
+== Adding a Showroom Instance
 
-. Click *＋ Add CI* (header or sidebar).
+. Click *＋ Add Showroom* (header or sidebar) — admin only.
 . Fill in the form:
 
 [cols="1,3"]
@@ -266,9 +338,9 @@ After any action a summary table appears on the card:
 
 NOTE: Some labs start at `module-00`, others at `module-01`.
 
-== Bulk Actions (All CIs)
+== Bulk Actions (All Showrooms)
 
-Click *Actions ▾* in the top-right corner to act on every CI at once.
+Click *Actions ▾* in the top-right corner (admin only) to act on every Showroom at once.
 
 [cols="1,1,3"]
 |===
@@ -276,36 +348,28 @@ Click *Actions ▾* in the top-right corner to act on every CI at once.
 
 | Sequential
 | ▶ Solve All
-| Starts sequential solve-only on each CI, one CI at a time.
+| Starts sequential solve-only on each Showroom, one at a time.
 
 | Sequential
 | ▶ Validate All
-| Starts sequential validate-only on each CI, one CI at a time.
+| Starts sequential validate-only on each Showroom, one at a time.
 
 | Sequential
 | ▶▶ Run All
-| Starts sequential solve + validate on each CI, one CI at a time.
+| Starts sequential solve + validate on each Showroom, one at a time.
 
 | Config
 | ⬇ Export Config
-| Downloads all CI configs as a JSON file (tokens included, IDs excluded).
+| Downloads all Showroom configs as a JSON file (tokens excluded from response — re-enter after import).
 
 | Config
 | ⬆ Import Config
-| Loads a previously exported JSON file and adds the CIs.
+| Loads a previously exported JSON file and adds the Showrooms.
 
 | Results
 | 🗑 Clear All Results
-| Wipes the module summary for every CI (with confirmation).
+| Wipes the module summary for every Showroom (with confirmation).
 |===
-
-== Editing and Removing CIs
-
-* *✎ Edit* — update name, URL, token, or module list.
-* *✕ Remove* — deletes the CI and clears its history (with confirmation).
-* Editing a CI does not interrupt an active stream.
-
-TIP: Leave *Auth Token* blank when editing to keep the existing token unchanged.
 
 == Where Data Is Stored
 
@@ -313,51 +377,69 @@ TIP: Leave *Auth Token* blank when editing to keep the existing token unchanged.
 |===
 | Data | Location
 
-| CI configurations (name, URL, token, modules)
-| `cis.json` in the project root — created automatically.
+| Showroom configs (name, URL, encrypted token, modules)
+| `cis.json` — tokens are encrypted with AES-128 (Fernet); the encryption key is in `.secret.key`.
 
-| Active stream buffers and sequential run state
-| Server memory — lost if the server restarts.
+| Users and hashed passwords
+| `users.json` — passwords are SHA-256 hashed with a per-user salt; never stored in plaintext.
 
-| Module run history (pass/fail per module)
+| TLS certificate and key
+| `.ssl/cert.pem` and `.ssl/key.pem` — auto-generated self-signed cert, valid 10 years.
+
+| Active stream buffers
+| Server memory — reconnected automatically by the browser on page refresh.
+
+| Sequential run progress
+| `seq_state.json` — saved before each module so runs resume after a server restart.
+
+| Module run history (pass/fail)
 | Browser `localStorage` — survives page refresh until browser data is cleared.
 
 | Persisted log files (full Ansible output)
-| `logs/{ci_id}/{module}/{stage}.log` in the project root.
+| `logs/{showroom_id}/{module}/{stage}.log`
 
 | Tile visibility and order
 | Browser `localStorage` under key `mouseops-visibility`.
 |===
 
-IMPORTANT: `cis.json` and `logs/` are in `.gitignore` and are never committed.
-They may contain auth tokens and internal Showroom URLs.
+IMPORTANT: `cis.json`, `users.json`, `.secret.key`, `.ssl/`, `logs/`, and `seq_state.json` are all in `.gitignore` and are never committed.
+
+== Security Notes
+
+* Showroom auth tokens are encrypted at rest with AES-128 (Fernet). The encryption key (`.secret.key`) must be kept safe — if lost, tokens must be re-entered.
+* Session cookies are `HttpOnly` and `SameSite=Strict`. In HTTPS mode they also carry the `Secure` flag so they are never sent over plain HTTP.
+* The self-signed TLS certificate will trigger a browser warning. Click *Advanced → Proceed* to continue. For production use, replace `.ssl/cert.pem` and `.ssl/key.pem` with a certificate from a trusted CA and restart.
 
 == Project Structure
 
 ----
 MouseOps/
-├── main.py              ← FastAPI backend (SSE proxy, sequential orchestrator)
+├── main.py              ← FastAPI backend
 ├── requirements.txt     ← Python dependencies
-├── run.sh               ← One-command startup (build + serve)
+├── run.sh               ← One-command startup (--http or --https)
 ├── build.sh             ← Builds React frontend → static/
 ├── frontend/            ← React source (Vite + Tailwind + dnd-kit)
+│   ├── public/
+│   │   └── logo.png     ← App logo (included in build)
 │   ├── src/
 │   │   ├── App.jsx
-│   │   ├── context/AppContext.jsx   ← global state
+│   │   ├── context/AppContext.jsx
 │   │   ├── hooks/
-│   │   │   ├── useStream.js         ← SSE streaming
-│   │   │   └── useSeqWatch.js       ← sequential run watcher
+│   │   │   ├── useStream.js
+│   │   │   └── useSeqWatch.js
 │   │   ├── components/
-│   │   │   ├── Sidebar.jsx          ← collapsible tile list + DnD
-│   │   │   ├── Dashboard.jsx        ← responsive tile grid
-│   │   │   ├── CITile.jsx           ← full tile card
+│   │   │   ├── Sidebar.jsx
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── CITile.jsx
+│   │   │   ├── LoginModal.jsx
+│   │   │   ├── UsersModal.jsx
 │   │   │   └── ...
 │   │   └── utils/
-│   │       ├── api.js               ← fetch wrappers
-│   │       ├── parser.js            ← Ansible output → step chips
-│   │       └── storage.js           ← localStorage helpers
+│   │       ├── api.js
+│   │       ├── parser.js
+│   │       └── storage.js
 │   └── package.json
-└── static/              ← Built frontend (served by FastAPI, not committed)
+└── static/              ← Built frontend (gitignored)
 ----
 
 == Updating
@@ -374,26 +456,37 @@ bash run.sh        # rebuilds frontend and restarts server
 |===
 | Problem | Fix
 
+| *Browser shows self-signed cert warning*
+| Click *Advanced → Proceed* (Chrome/Edge) or *Accept the Risk* (Firefox).
+  For production, replace `.ssl/cert.pem` and `.ssl/key.pem` with a trusted cert.
+
+| *Forgot admin password*
+| Delete `users.json` and restart. The default `admin / mouseops` account is recreated automatically.
+
+| *`.secret.key` lost or deleted*
+| Regenerates on next start, but all existing Showroom tokens will fail to decrypt.
+  Open each Showroom in *✎ Edit* and re-enter its token.
+
 | *❌ Showroom unreachable — HTTP 404*
-| The URL or module name is wrong. Open the CI in *✎ Edit* and verify the Showroom URL and module names.
+| URL or module name is wrong. Open the Showroom in *✎ Edit* and verify.
 
 | *❌ Cannot connect to Showroom*
-| Showroom is down or unreachable. Check VPN and try the URL directly in your browser.
+| Showroom is down or unreachable from your network. Check VPN and try the URL in your browser.
 
-| *Sequential run lost after server restart*
-| The server-side run state is in memory. If the server restarts, active runs are lost. Re-run from the card.
+| *Sequential run not resumed after restart*
+| Check that `seq_state.json` was not manually deleted. If missing, restart the run from the card.
 
-| *Port 8765 already in use*
-| Stop the other process or change `--port 8765` in `run.sh`.
+| *Port already in use*
+| Change ports: `MOUSEOPS_HTTP_PORT=8080 MOUSEOPS_HTTPS_PORT=8443 bash run.sh`
 
-| *Frontend looks outdated after git pull*
-| Run `bash build.sh` to rebuild, then restart the server.
+| *Frontend looks outdated after `git pull`*
+| Run `bash build.sh` to rebuild, then restart.
 
 | *Module summary missing after browser clear*
 | `localStorage` was wiped. Re-run the modules to rebuild the table.
 
 | *`python3: command not found`*
-| Install Python 3.11+ and ensure it is on `$PATH`.
+| Install Python 3.11+ from https://www.python.org and add it to `$PATH`.
 
 | *`node: command not found`*
 | Install Node.js 18+ from https://nodejs.org.

@@ -1,15 +1,25 @@
 import asyncio
+import datetime
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import secrets
+import stat
+import sys
 import threading
 import time
 import uuid
 from collections import deque
 from pathlib import Path
 from typing import Literal, Optional
+
+from cryptography.fernet import Fernet, InvalidToken
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Path as FPath, Response
 from fastapi.responses import StreamingResponse, PlainTextResponse
@@ -21,9 +31,92 @@ import httpx
 _URL_RE    = re.compile(r'^https?://.{1,490}$', re.IGNORECASE)
 _MODULE_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9\-\.]{0,99}$')
 
-DATA_FILE  = Path("cis.json")
-USERS_FILE = Path("users.json")
-LOGS_DIR   = Path("logs")
+DATA_FILE      = Path("cis.json")
+USERS_FILE     = Path("users.json")
+LOGS_DIR       = Path("logs")
+SEQ_STATE_FILE = Path("seq_state.json")
+KEY_FILE       = Path(".secret.key")
+
+# ── TLS / ports ───────────────────────────────────────────────────────────────
+SSL_DIR   = Path(".ssl")
+SSL_CERT  = SSL_DIR / "cert.pem"
+SSL_KEY   = SSL_DIR / "key.pem"
+
+HTTP_PORT  = int(os.getenv("MOUSEOPS_HTTP_PORT",  "8765"))
+HTTPS_PORT = int(os.getenv("MOUSEOPS_HTTPS_PORT", "8766"))
+
+
+def _ensure_ssl_cert() -> None:
+    """Generate a self-signed TLS cert valid for 10 years if one doesn't exist."""
+    if SSL_CERT.exists() and SSL_KEY.exists():
+        return
+    SSL_DIR.mkdir(exist_ok=True)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "MouseOps"),
+        x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+    ])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.datetime.utcnow())
+        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=3650))
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+            ]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    SSL_KEY.write_bytes(key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ))
+    SSL_KEY.chmod(stat.S_IRUSR | stat.S_IWUSR)   # 0o600
+    SSL_CERT.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    print(f"Generated self-signed TLS cert → {SSL_CERT}", file=sys.stderr)
+
+
+HTTPS_MODE = os.getenv("MOUSEOPS_MODE", "https") == "https"
+
+# Generate cert only when running in HTTPS mode
+if HTTPS_MODE:
+    _ensure_ssl_cert()
+
+# ── Token encryption ──────────────────────────────────────────────────────────
+def _load_or_create_key() -> bytes:
+    # Lock prevents two processes generating different keys simultaneously (Bug 8)
+    with _file_lock:
+        if KEY_FILE.exists():
+            return KEY_FILE.read_bytes()
+        key = Fernet.generate_key()
+        KEY_FILE.write_bytes(key)
+        KEY_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)   # 0o600 — owner only
+        return key
+
+_fernet = Fernet(_load_or_create_key())
+
+
+def encrypt_token(token: str) -> str:
+    if not token:
+        return ""
+    return _fernet.encrypt(token.encode()).decode()
+
+
+def decrypt_token(value: str) -> str:
+    """Decrypt a token. Falls back to returning the value as-is for legacy plaintext."""
+    if not value:
+        return ""
+    try:
+        return _fernet.decrypt(value.encode()).decode()
+    except (InvalidToken, Exception):
+        return value   # old plaintext — will be encrypted on next save
 
 _file_lock = threading.Lock()
 
@@ -92,17 +185,134 @@ def require_write(user: dict = Depends(get_current_user)) -> dict:
 
 
 def load_cis() -> list:
-    if DATA_FILE.exists():
-        return json.loads(DATA_FILE.read_text())
-    return []
+    if not DATA_FILE.exists():
+        return []
+    cis = json.loads(DATA_FILE.read_text())
+    for ci in cis:
+        if ci.get("token"):
+            ci["token"] = decrypt_token(ci["token"])   # transparent decryption
+    return cis
 
 
 def save_cis(cis: list) -> None:
+    encrypted = []
+    for ci in cis:
+        ec = dict(ci)
+        if ec.get("token"):
+            ec["token"] = encrypt_token(ec["token"])   # encrypt before writing
+        encrypted.append(ec)
     with _file_lock:
-        DATA_FILE.write_text(json.dumps(cis, indent=2))
+        DATA_FILE.write_text(json.dumps(encrypted, indent=2))
+
+
+# ── Sequential run state persistence ─────────────────────────────────────────
+def save_seq_state() -> None:
+    """Persist all active (non-done) sequential runs so they survive a restart."""
+    snapshot = {
+        ci_id: {
+            "mode":         s["mode"],
+            "mods":         s["mods"],
+            "currentIdx":   s.get("currentIdx", 0),
+        }
+        for ci_id, s in _seq_active.items()
+        if not s.get("done") and not s.get("stopped")
+    }
+    with _file_lock:   # prevent concurrent _bg_seq tasks corrupting the file (Bug 3)
+        if snapshot:
+            SEQ_STATE_FILE.write_text(json.dumps(snapshot, indent=2))
+        elif SEQ_STATE_FILE.exists():
+            SEQ_STATE_FILE.unlink()
+
+
+def load_seq_state() -> dict:
+    if not SEQ_STATE_FILE.exists():
+        return {}
+    try:
+        return json.loads(SEQ_STATE_FILE.read_text())
+    except Exception as e:
+        import sys
+        print(f"WARNING: Could not load seq_state.json ({e}) — interrupted runs will not resume", file=sys.stderr)
+        return {}
 
 
 app = FastAPI(title="MouseOps")
+
+
+@app.on_event("startup")
+async def _resume_seq_runs() -> None:
+    """On server start, resume any sequential runs that were interrupted."""
+    saved = load_seq_state()
+    if not saved:
+        return
+    cis = load_cis()
+    for ci_id, snap in saved.items():
+        ci = next((c for c in cis if c["id"] == ci_id), None)
+        if not ci:
+            continue
+        state = {
+            "mode":         snap["mode"],
+            "mods":         snap["mods"],
+            "currentIdx":   snap.get("currentIdx", 0),
+            "currentMod":   None,
+            "currentStage": None,
+            "done":         False,
+            "stopped":      False,
+            "paused":       False,
+            "pausedMod":    None,
+            "pausedStage":  None,
+            "_decision_event": None,
+            "decision":     None,
+            "_resume_from": snap.get("currentIdx", 0),  # restart from this module
+        }
+        _seq_active[ci_id] = state
+        asyncio.create_task(_bg_seq(ci_id, ci, state))
+
+
+@app.on_event("startup")
+async def _start_http_redirect() -> None:
+    """In HTTPS mode: start a lightweight HTTP server that redirects to HTTPS."""
+    if not HTTPS_MODE:
+        print(f"MouseOps running in HTTP mode on port {HTTP_PORT}", file=sys.stderr)
+        return
+    async def _handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            data = await asyncio.wait_for(reader.read(4096), timeout=5)
+            text = data.decode("utf-8", errors="ignore")
+            # Extract request path
+            path = "/"
+            first = text.split("\n")[0].split()
+            if len(first) >= 2:
+                path = first[1]
+            # Extract Host header to preserve the hostname the client used
+            host = "localhost"
+            for line in text.split("\n"):
+                if line.lower().startswith("host:"):
+                    host = line.split(":", 1)[1].strip().split(":")[0]
+                    break
+            target = f"https://{host}:{HTTPS_PORT}{path}"
+            resp = (
+                f"HTTP/1.1 301 Moved Permanently\r\n"
+                f"Location: {target}\r\n"
+                f"Connection: close\r\n"
+                f"Content-Length: 0\r\n\r\n"
+            )
+            writer.write(resp.encode())
+            await writer.drain()
+        except Exception:
+            pass
+        finally:
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+    try:
+        server = await asyncio.start_server(_handler, "0.0.0.0", HTTP_PORT)
+        asyncio.create_task(server.serve_forever())
+        print(f"HTTP  → http://127.0.0.1:{HTTP_PORT}  (redirects to HTTPS)", file=sys.stderr)
+        print(f"HTTPS → https://127.0.0.1:{HTTPS_PORT}", file=sys.stderr)
+    except OSError as e:
+        print(f"WARNING: Could not start HTTP redirect on port {HTTP_PORT}: {e}", file=sys.stderr)
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -210,6 +420,7 @@ def login(req: LoginRequest, response: Response):
     response.set_cookie(
         key="mouseops_session", value=token,
         httponly=True, samesite="strict", max_age=8 * 3600,
+        secure=HTTPS_MODE,   # only mark Secure when actually running over HTTPS
     )
     return {"username": user["username"], "role": user["role"], "readonly": READONLY}
 
@@ -387,9 +598,14 @@ def seq_decision(
 
 
 # ── CI CRUD ───────────────────────────────────────────────────────────────────
+def _strip_token(ci: dict) -> dict:
+    """Return a CI dict with the token removed — tokens must never leave the server."""
+    return {k: v for k, v in ci.items() if k != "token"}
+
+
 @app.get("/api/cis")
 def get_cis(_: dict = Depends(get_current_user)):
-    return load_cis()
+    return [_strip_token(ci) for ci in load_cis()]
 
 
 @app.post("/api/cis", status_code=201)
@@ -398,7 +614,7 @@ def create_ci(ci: CIConfig, _: dict = Depends(require_write)):
     entry = {**ci.model_dump(), "id": str(uuid.uuid4())}
     cis.append(entry)
     save_cis(cis)
-    return entry
+    return _strip_token(entry)
 
 
 @app.put("/api/cis/{ci_id}")
@@ -407,11 +623,12 @@ def update_ci(ci_id: str, ci: CIConfig, _: dict = Depends(require_write)):
     for i, c in enumerate(cis):
         if c["id"] == ci_id:
             new = {**ci.model_dump(), "id": ci_id}
+            # c["token"] is plaintext (decrypted by load_cis); save_cis will encrypt it
             if not new.get("token") and c.get("token"):
                 new["token"] = c["token"]
             cis[i] = new
             save_cis(cis)
-            return cis[i]
+            return _strip_token(cis[i])   # never send token back to client (Bug 2)
     raise HTTPException(status_code=404, detail="CI not found")
 
 
@@ -568,16 +785,21 @@ async def _run_module(ci_id, mod, mode, ci, seq_state):
 
 
 async def _bg_seq(ci_id, ci, state):
+    resume_from = state.pop("_resume_from", 0)
     for i, mod in enumerate(state["mods"]):
+        if i < resume_from:
+            continue   # skip already-completed modules
         if state.get("stopped"):
             break
         state["currentIdx"] = i
         state["currentMod"] = mod
         state["currentStage"] = None
+        save_seq_state()   # persist progress before each module
         result = await _run_module(ci_id, mod, state["mode"], ci, state)
         if result == "stop" or state.get("stopped"):
             break
     state["done"] = True
+    save_seq_state()   # cleans up the saved state
     async def _cleanup():
         await asyncio.sleep(10)
         _seq_active.pop(ci_id, None)
